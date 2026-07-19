@@ -1,13 +1,20 @@
 import { injectable, inject } from 'inversify';
-import { Response } from 'express';
+import { Response, Request } from 'express';
 import { ILE_TYPES } from '../types.js';
 import { IleSseService } from './IleSseService.js';
 import { IleRepository } from '../repositories/IleRepository.js';
 import { IleAiConfigService } from './IleAiConfigService.js';
 import { IleAssetService } from './IleAssetService.js';
 import { IleExperience } from '../classes/transformers/IleExperience.js';
-import { ChatStream, IleAiConfig } from './providers/types.js';
+import {
+  ChatStream,
+  IleAiConfig,
+  ProviderError,
+  ProviderCancelledError,
+  asProviderError,
+} from './providers/types.js';
 import { createProvider } from './providers/index.js';
+import { ileLog } from './observability.js';
 
 const SYSTEM_PROMPT = `You are ViBe's Interactive Learning Experience designer.
 Your job is to design a single self-contained interactive HTML experience
@@ -81,6 +88,16 @@ const PROGRESS_STEPS = [
   '✓ Finalizing',
 ];
 
+/**
+ * Cancellation reason — surfaced to logs + the structured SSE `error`
+ * event so the frontend can tell the teacher *why* their stream stopped.
+ */
+type CancellationReason =
+  | 'client_disconnect'
+  | 'client_abort'
+  | 'upstream_timeout'
+  | 'editor_cancel';
+
 @injectable()
 export class IleGenerationService {
   constructor(
@@ -96,9 +113,20 @@ export class IleGenerationService {
    * Stream a fresh generation. Saves a new draft experience document
    * and emits SSE events as the LLM produces HTML.
    *
+   * Cancellation is wired through:
+   *   - `req.on('close')`  → client disconnected (closed browser tab,
+   *     lost network mid-stream). We abort the upstream provider so the
+   *     fetch tears down and we don't keep paying for tokens.
+   *   - `signal`           → external AbortController (used by tests,
+   *     the editor's Cancel button, and the SSE layer itself when the
+   *     teacher hits Back).
+   *   - The provider's own internal 120s deadline (defence in depth).
+   *
    * @param ownerId  Firebase uid of the teacher.
    * @param req      Express request (used for SSE heartbeat / cleanup).
    * @param res      Express response, configured by sse.init().
+   * @param requestId  Structured-log correlation id (optional; one is
+   *                  generated if absent).
    */
   async generate(
     ownerId: string,
@@ -109,12 +137,46 @@ export class IleGenerationService {
       courseVersionId: string;
       itemId?: string;
       prompt: string;
+      requestId?: string;
     },
   ): Promise<void> {
+    const requestId = args.requestId ?? cryptoRandomId();
     this.sse.init(req, res);
 
+    // Cancellation wiring:
+    //   - `req.on('close')`  — the browser disconnected (closed tab,
+    //      navigated away). We tear down the upstream so we don't keep
+    //      paying for tokens we'll never deliver.
+    //   - The provider's own 120s deadline (defence in depth).
+    //
+    // We don't read `req.signal` directly — Express's @types don't
+    // expose it; the `close` event fires for all the cases we care
+    // about (browser navigation, network drop, abort).
+    const abort = new AbortController();
+    let cancellationReason: CancellationReason | null = null;
+    const onClose = () => {
+      cancellationReason = 'client_disconnect';
+      abort.abort();
+    };
+    req.once('close', onClose);
+    abort.signal.addEventListener('abort', () => {
+      req.off('close', onClose);
+    });
+
+    const t0 = Date.now();
+    let tokenCount = 0;
+    let responseBytes = 0;
+    let cancelled = false;
+
     try {
-      const { client } = await this.makeClientForOwner(ownerId);
+      const { client, config } = await this.makeClientForOwner(ownerId);
+      ileLog('info', 'stream.start', {
+        requestId,
+        ownerId,
+        provider: config.provider,
+        model: config.model,
+        kind: 'generate',
+      });
 
       // 1. Persist a fresh draft so we have an _id we can reference later.
       const draft = new IleExperience({
@@ -147,12 +209,14 @@ export class IleGenerationService {
       };
       fireNextStep();
 
-      // 4. Stream the response via the configured provider.
+      // 4. Stream the response via the configured provider. We pass
+      //    `abort.signal` so the provider tears down on client disconnect.
       const stream = client.stream({
         system: await this.buildSystemPrompt(ownerId),
         messages: [{ role: 'user', content: args.prompt }],
         temperature: 0.4,
         maxTokens: 8192,
+        signal: abort.signal,
       });
 
       let html = '';
@@ -164,9 +228,12 @@ export class IleGenerationService {
       let truncated = false;
 
       for await (const chunk of stream) {
+        if (abort.signal.aborted) break;
         if (chunk.kind === 'text') {
           html += chunk.delta;
           chunkCount++;
+          tokenCount += approximateTokens(chunk.delta);
+          responseBytes += Buffer.byteLength(chunk.delta, 'utf8');
           this.sse.emit(res, 'html', { delta: chunk.delta });
 
           // Fire progress steps as we accumulate HTML.
@@ -196,6 +263,29 @@ export class IleGenerationService {
         }
       }
 
+      // Distinguish cancelled vs completed vs upstream timeout.
+      if (abort.signal.aborted) {
+        cancelled = true;
+        // Provider throws ProviderCancelledError on its own abort path;
+        // if it didn't (e.g. abort fired between chunks), we still need
+        // a uniform reason here.
+        if (cancellationReason === null) cancellationReason = 'client_abort';
+        ileLog('info', 'stream.cancelled', {
+          requestId,
+          ownerId,
+          reason: cancellationReason,
+          partialBytes: responseBytes,
+          partialTokens: tokenCount,
+          elapsedMs: Date.now() - t0,
+        });
+        this.sse.emit(res, 'error', {
+          message: 'Generation cancelled.',
+          kind: 'cancelled',
+          reason: cancellationReason,
+        });
+        return;
+      }
+
       // 5. Final cleanup: ensure last step fires, persist the assistant turn.
       fireNextStep();
 
@@ -214,15 +304,61 @@ export class IleGenerationService {
         experienceId: String(saved._id),
         html: finalHtml,
         truncated: truncated || undefined,
+        // Observability — the chat footer renders tokens + latency.
+        tokens: tokenCount,
+        bytes: responseBytes,
+        provider: config.provider,
+        model: config.model,
+        elapsedMs: Date.now() - t0,
+      });
+
+      ileLog('info', 'stream.complete', {
+        requestId,
+        ownerId,
+        provider: config.provider,
+        model: config.model,
+        elapsedMs: Date.now() - t0,
+        tokens: tokenCount,
+        bytes: responseBytes,
+        truncated,
       });
     } catch (err: any) {
-      console.error('[ILE] generation failed:', err);
+      const pe = err instanceof ProviderError ? err : asProviderError(err, 'unknown');
+      if (pe instanceof ProviderCancelledError) {
+        cancelled = true;
+        ileLog('info', 'stream.cancelled', {
+          requestId,
+          ownerId,
+          reason: cancellationReason ?? 'upstream_timeout',
+          partialBytes: responseBytes,
+          partialTokens: tokenCount,
+          elapsedMs: Date.now() - t0,
+        });
+        this.sse.emit(res, 'error', {
+          message: 'Generation cancelled.',
+          kind: 'cancelled',
+          reason: cancellationReason ?? 'client_abort',
+        });
+        return;
+      }
+      ileLog('error', 'stream.error', {
+        requestId,
+        ownerId,
+        kind: pe.kind,
+        upstreamStatus: pe.upstreamStatus,
+        message: pe.message,
+        elapsedMs: Date.now() - t0,
+      });
       this.sse.emit(res, 'error', {
-        message: err?.message ?? 'Generation failed',
+        message: pe.message || 'Generation failed',
+        kind: pe.kind,
+        upstreamStatus: pe.upstreamStatus,
       });
     } finally {
+      req.off('close', onClose);
       this.sse.cleanup(res);
     }
+    void cancelled; // referenced for completeness in logs above
   }
 
   /**
@@ -234,9 +370,23 @@ export class IleGenerationService {
     ownerId: string,
     req: Parameters<IleSseService['init']>[0],
     res: Response,
-    args: { experienceId: string; prompt: string },
+    args: { experienceId: string; prompt: string; requestId?: string },
   ): Promise<void> {
+    const requestId = args.requestId ?? cryptoRandomId();
     this.sse.init(req, res);
+
+    // See the cancellation note on `generate` above.
+    const abort = new AbortController();
+    let cancellationReason: CancellationReason | null = null;
+    const onClose = () => {
+      cancellationReason = 'client_disconnect';
+      abort.abort();
+    };
+    req.once('close', onClose);
+
+    const t0 = Date.now();
+    let tokenCount = 0;
+    let responseBytes = 0;
 
     try {
       const existing = await this.repo.findById(args.experienceId);
@@ -257,22 +407,34 @@ export class IleGenerationService {
 
       this.sse.emit(res, 'start', { experienceId: args.experienceId });
 
-      const { client } = await this.makeClientForOwner(ownerId);
+      const { client, config } = await this.makeClientForOwner(ownerId);
+      ileLog('info', 'stream.start', {
+        requestId,
+        ownerId,
+        provider: config.provider,
+        model: config.model,
+        kind: 'edit',
+        experienceId: args.experienceId,
+      });
       const editUserContent = `Current HTML:\n\`\`\`html\n${existing.html}\n\`\`\`\n\nEdit instruction: ${args.prompt}\n\nReturn the full rewritten HTML document.`;
       const stream = client.stream({
         system: await this.buildSystemPrompt(ownerId),
         messages: [{ role: 'user', content: editUserContent }],
         temperature: 0.4,
         maxTokens: 8192,
+        signal: abort.signal,
       });
 
       let html = '';
       let chunkCount = 0;
       let truncated = false;
       for await (const chunk of stream) {
+        if (abort.signal.aborted) break;
         if (chunk.kind === 'text') {
           html += chunk.delta;
           chunkCount++;
+          tokenCount += approximateTokens(chunk.delta);
+          responseBytes += Buffer.byteLength(chunk.delta, 'utf8');
           this.sse.emit(res, 'html', { delta: chunk.delta });
           if (chunkCount === 1) {
             this.sse.emit(res, 'progress', { message: '✓ Reading the current version' });
@@ -288,6 +450,25 @@ export class IleGenerationService {
         }
       }
 
+      if (abort.signal.aborted) {
+        ileLog('info', 'stream.cancelled', {
+          requestId,
+          ownerId,
+          reason: cancellationReason ?? 'client_abort',
+          kind: 'edit',
+          experienceId: args.experienceId,
+          partialBytes: responseBytes,
+          partialTokens: tokenCount,
+          elapsedMs: Date.now() - t0,
+        });
+        this.sse.emit(res, 'error', {
+          message: 'Edit cancelled.',
+          kind: 'cancelled',
+          reason: cancellationReason ?? 'client_abort',
+        });
+        return;
+      }
+
       const finalHtml = this.normalizeHtml(html);
       await this.repo.update(args.experienceId, { html: finalHtml });
       await this.repo.appendHistory(args.experienceId, {
@@ -300,13 +481,60 @@ export class IleGenerationService {
         experienceId: args.experienceId,
         html: finalHtml,
         truncated: truncated || undefined,
+        tokens: tokenCount,
+        bytes: responseBytes,
+        provider: config.provider,
+        model: config.model,
+        elapsedMs: Date.now() - t0,
+      });
+
+      ileLog('info', 'stream.complete', {
+        requestId,
+        ownerId,
+        provider: config.provider,
+        model: config.model,
+        kind: 'edit',
+        experienceId: args.experienceId,
+        elapsedMs: Date.now() - t0,
+        tokens: tokenCount,
+        bytes: responseBytes,
+        truncated,
       });
     } catch (err: any) {
-      console.error('[ILE] edit failed:', err);
+      const pe = err instanceof ProviderError ? err : asProviderError(err, 'unknown');
+      if (pe instanceof ProviderCancelledError) {
+        ileLog('info', 'stream.cancelled', {
+          requestId,
+          ownerId,
+          reason: cancellationReason ?? 'client_abort',
+          kind: 'edit',
+          experienceId: args.experienceId,
+          elapsedMs: Date.now() - t0,
+        });
+        this.sse.emit(res, 'error', {
+          message: 'Edit cancelled.',
+          kind: 'cancelled',
+          reason: cancellationReason ?? 'client_abort',
+        });
+        return;
+      }
+      ileLog('error', 'stream.error', {
+        requestId,
+        ownerId,
+        kind: pe.kind,
+        upstreamStatus: pe.upstreamStatus,
+        message: pe.message,
+        elapsedMs: Date.now() - t0,
+        kindOperation: 'edit',
+        experienceId: args.experienceId,
+      });
       this.sse.emit(res, 'error', {
-        message: err?.message ?? 'Edit failed',
+        message: pe.message || 'Edit failed',
+        kind: pe.kind,
+        upstreamStatus: pe.upstreamStatus,
       });
     } finally {
+      req.off('close', onClose);
       this.sse.cleanup(res);
     }
   }
@@ -331,7 +559,7 @@ export class IleGenerationService {
         prompt = `${prompt}\n\n${assetFragment}`;
       }
     } catch (err) {
-      console.warn('[ILE] failed to load asset context', err);
+      ileLog('warn', 'asset.context.failed', { ownerId, error: (err as Error).message });
     }
     return prompt;
   }
@@ -386,4 +614,19 @@ export class IleGenerationService {
     if (fence) html = fence[1];
     return html.trim();
   }
+}
+
+/**
+ * Cheap token approximation for observability — 4 chars ≈ 1 token. The
+ * actual provider returns a `usage` block on non-streaming calls, but
+ * we don't have that for streaming. This is good enough to bucket
+ * streams in the log pipeline.
+ */
+function approximateTokens(s: string): number {
+  return Math.ceil(s.length / 4);
+}
+
+/** Generate a short, sortable correlation id for log lines. */
+function cryptoRandomId(): string {
+  return `req_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }

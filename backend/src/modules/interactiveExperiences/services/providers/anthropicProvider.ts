@@ -3,16 +3,20 @@ import {
   ChatMessage,
   ChatStream,
   ChatStreamRequest,
-  ProviderAuthError,
-  ProviderNetworkError,
+  classifyUpstreamError,
+  asProviderError,
   StreamChunk,
 } from './types.js';
 
 /**
- * How long we'll wait for the upstream provider before we hang up and
- * surface a `provider_timeout` error to the SSE channel. Generous because
- * long completions can have quiet stretches — but small enough that a
- * dead stream doesn't leak money.
+ * How long we'll wait for the upstream provider before we hand up and
+ * surface a `ProviderTimeoutError` to the SSE channel. Generous
+ * because long completions can have quiet stretches — but small enough
+ * that a dead stream doesn't leak money.
+ *
+ * SECURITY-TODO(production): keep this tunable via env. The local dev
+ * default is fine; production should set ILE_UPSTREAM_TIMEOUT_MS based
+ * on observed p99 latencies for the chosen model.
  */
 const UPSTREAM_DEADLINE_MS = 120_000;
 
@@ -38,6 +42,14 @@ const ANTHROPIC_TRUNCATION_REASONS = new Set([
  * turn for MVP simplicity. In practice we let the caller pass the model via
  * the system message by encoding it in `req.system` is ugly — so we accept
  * a modelName arg in the constructor instead, and the factory wires it up.
+ *
+ * Cancellation: any of the following stop the stream and throw a
+ * `ProviderCancelledError`:
+ *
+ *   - The caller passing `req.signal.aborted` (browser disconnect, editor
+ *     cancel, timeout via the SSE layer)
+ *   - The internal 120s deadline firing
+ *   - The Anthropic SDK's own heartbeat noticing the connection dropped
  */
 export class AnthropicProvider implements ChatStream {
   constructor(
@@ -45,7 +57,10 @@ export class AnthropicProvider implements ChatStream {
     private readonly modelName: string,
   ) {
     if (!apiKey) {
-      throw new ProviderAuthError('Anthropic API key is empty');
+      throw asProviderError(
+        { name: 'ProviderAuthError', message: 'Anthropic API key is empty' },
+        'anthropic',
+      );
     }
   }
 
@@ -53,19 +68,31 @@ export class AnthropicProvider implements ChatStream {
     return new Anthropic({ apiKey: this.apiKey });
   }
 
-  async *stream(req: ChatStreamRequest): AsyncIterable<StreamChunk> {
+  async *stream(req: ChatStreamRequest & { signal?: AbortSignal }): AsyncIterable<StreamChunk> {
     const messages = req.messages.filter(
       (m): m is { role: 'user' | 'assistant'; content: string } => m.role !== 'system',
     );
 
-    // The SDK aborts the underlying fetch when we abort the controller,
-    // so a stalled upstream surfaces as a clean network error instead of
-    // hanging the SSE connection.
+    // Combine the upstream deadline with any signal the caller passed.
+    // We honor whichever fires first.
     const controller = new AbortController();
-    const deadline = setTimeout(
-      () => controller.abort(),
-      UPSTREAM_DEADLINE_MS,
-    );
+    const deadline = setTimeout(() => controller.abort(), UPSTREAM_DEADLINE_MS);
+    const onCallerAbort = () => controller.abort();
+    if (req.signal) {
+      if (req.signal.aborted) {
+        clearTimeout(deadline);
+        throw asProviderError(
+          { name: 'AbortError' },
+          'anthropic',
+        );
+      }
+      req.signal.addEventListener('abort', onCallerAbort, { once: true });
+    }
+    const onControllerAbort = () => {
+      if (req.signal) req.signal.removeEventListener('abort', onCallerAbort);
+      clearTimeout(deadline);
+    };
+    controller.signal.addEventListener('abort', onControllerAbort, { once: true });
 
     let truncated = false;
     try {
@@ -100,9 +127,12 @@ export class AnthropicProvider implements ChatStream {
         }
       }
     } catch (err: any) {
-      this.translateError(err);
+      // The Anthropic SDK throws its own error shapes. Map them onto
+      // the typed taxonomy so the caller can classify confidently.
+      throw asProviderError(err, 'anthropic');
     } finally {
       clearTimeout(deadline);
+      onControllerAbort();
     }
     // Defer the truncation signal to a non-chunk event so generators
     // don't have to inspect every chunk. The provider emits ONE yield
@@ -112,24 +142,18 @@ export class AnthropicProvider implements ChatStream {
   }
 
   /** Lightweight test-connection probe. */
-  async testConnection(): Promise<void> {
+  async testConnection(req: { signal?: AbortSignal } = {}): Promise<void> {
     try {
-      await this.client().messages.create({
-        model: this.modelName,
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'ping' }],
-      });
+      await this.client().messages.create(
+        {
+          model: this.modelName,
+          max_tokens: 1,
+          messages: [{ role: 'user', content: 'ping' }],
+        },
+        { signal: req.signal },
+      );
     } catch (err: any) {
-      this.translateError(err);
+      throw asProviderError(err, 'anthropic');
     }
-  }
-
-  private translateError(err: any): never {
-    const status = err?.status ?? err?.response?.status;
-    const message = err?.message ?? 'Anthropic request failed';
-    if (status === 401 || status === 403) {
-      throw new ProviderAuthError(`Invalid API key: ${message}`);
-    }
-    throw new ProviderNetworkError(`Network error: ${message}`);
   }
 }

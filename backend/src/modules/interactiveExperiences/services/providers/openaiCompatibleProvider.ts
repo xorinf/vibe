@@ -1,8 +1,8 @@
 import {
   ChatStream,
   ChatStreamRequest,
-  ProviderAuthError,
-  ProviderNetworkError,
+  classifyUpstreamError,
+  asProviderError,
   StreamChunk,
 } from './types.js';
 
@@ -26,6 +26,8 @@ import {
  * How long we'll wait for the upstream provider before we abort the fetch.
  * Generous because long completions can have quiet stretches, but small
  * enough that a dead stream doesn't leak money.
+ *
+ * SECURITY-TODO(production): keep this tunable via env (see anthropic).
  */
 const UPSTREAM_DEADLINE_MS = 120_000;
 
@@ -51,10 +53,16 @@ export class OpenAICompatibleProvider implements ChatStream {
     private readonly baseUrl: string,
   ) {
     if (!apiKey) {
-      throw new ProviderAuthError('API key is empty');
+      throw asProviderError(
+        { name: 'ProviderAuthError', message: 'API key is empty' },
+        'openai-compatible',
+      );
     }
     if (!baseUrl) {
-      throw new ProviderAuthError('Base URL is required for OpenAI-compatible providers');
+      throw asProviderError(
+        { name: 'ProviderAuthError', message: 'Base URL is required for OpenAI-compatible providers' },
+        'openai-compatible',
+      );
     }
   }
 
@@ -82,10 +90,24 @@ export class OpenAICompatibleProvider implements ChatStream {
    * Parse an SSE stream into our unified StreamChunk shape. Returns the
    * fetch Response so the caller is responsible for reading the body and
    * aborting on disconnect.
+   *
+   * Cancellation:
+   *   - The internal 120s deadline fires controller.abort() automatically.
+   *   - The caller can pass `req.signal`; we wire it into our internal
+   *     controller via addEventListener('abort') so the caller's signal
+   *     propagates into the fetch.
    */
-  async *stream(req: ChatStreamRequest): AsyncIterable<StreamChunk> {
-    const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(), UPSTREAM_DEADLINE_MS);
+  async *stream(req: ChatStreamRequest & { signal?: AbortSignal }): AsyncIterable<StreamChunk> {
+    const internal = new AbortController();
+    const deadline = setTimeout(() => internal.abort(), UPSTREAM_DEADLINE_MS);
+    if (req.signal) {
+      if (req.signal.aborted) {
+        clearTimeout(deadline);
+        throw asProviderError({ name: 'AbortError' }, 'openai-compatible');
+      }
+      const onCallerAbort = () => internal.abort();
+      req.signal.addEventListener('abort', onCallerAbort, { once: true });
+    }
 
     let response: Response;
     try {
@@ -97,24 +119,62 @@ export class OpenAICompatibleProvider implements ChatStream {
           Accept: 'text/event-stream',
         },
         body: JSON.stringify(this.buildBody(req)),
-        signal: controller.signal,
+        signal: internal.signal,
       });
     } catch (err: any) {
       clearTimeout(deadline);
-      throw new ProviderNetworkError(
-        `Network error: ${err?.message ?? String(err)}`,
-      );
+      // fetch wraps AbortError; let the typed mapping classify it.
+      if (err?.name === 'AbortError' && req.signal?.aborted) {
+        throw asProviderError({ name: 'AbortError' }, 'openai-compatible');
+      }
+      throw classifyUpstreamError({
+        name: err?.name,
+        message: err?.message ?? String(err),
+        provider: 'openai-compatible',
+        cause: err,
+      });
     }
 
     if (response.status === 401 || response.status === 403) {
       clearTimeout(deadline);
-      throw new ProviderAuthError(`Invalid API key (HTTP ${response.status})`);
+      throw classifyUpstreamError({
+        upstreamStatus: response.status,
+        provider: 'openai-compatible',
+        message: `Invalid API key (HTTP ${response.status})`,
+        cause: response,
+      });
+    }
+    if (response.status === 404) {
+      clearTimeout(deadline);
+      throw classifyUpstreamError({
+        upstreamStatus: 404,
+        provider: 'openai-compatible',
+        message: 'Model not found on the configured endpoint',
+      });
+    }
+    if (response.status === 408 || response.status === 504) {
+      clearTimeout(deadline);
+      throw classifyUpstreamError({
+        upstreamStatus: response.status,
+        provider: 'openai-compatible',
+        message: `Upstream timeout (HTTP ${response.status})`,
+      });
+    }
+    if (response.status === 429) {
+      clearTimeout(deadline);
+      throw classifyUpstreamError({
+        upstreamStatus: 429,
+        provider: 'openai-compatible',
+        message: 'Rate limited or quota exceeded',
+      });
     }
     if (!response.ok || !response.body) {
       clearTimeout(deadline);
-      throw new ProviderNetworkError(
-        `Provider responded ${response.status} ${response.statusText}`,
-      );
+      throw classifyUpstreamError({
+        upstreamStatus: response.status,
+        provider: 'openai-compatible',
+        message: `Provider responded ${response.status} ${response.statusText}`,
+      });
     }
 
     const reader = response.body.getReader();
@@ -190,7 +250,7 @@ export class OpenAICompatibleProvider implements ChatStream {
 
   /** Lightweight test-connection probe. Reuses the streaming endpoint with
    * max_tokens=1 and aborts after the first chunk. */
-  async testConnection(): Promise<void> {
+  async testConnection(req: { signal?: AbortSignal } = {}): Promise<void> {
     const body = {
       model: this.modelName,
       messages: [{ role: 'user', content: 'ping' }],
@@ -198,8 +258,8 @@ export class OpenAICompatibleProvider implements ChatStream {
       max_tokens: 1,
       stream: false,
     };
-    const controller = new AbortController();
-    const deadline = setTimeout(() => controller.abort(), UPSTREAM_DEADLINE_MS);
+    const internal = new AbortController();
+    const deadline = setTimeout(() => internal.abort(), UPSTREAM_DEADLINE_MS);
 
     let response: Response;
     try {
@@ -211,22 +271,56 @@ export class OpenAICompatibleProvider implements ChatStream {
           Accept: 'application/json',
         },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: req.signal
+          ? mergeSignals(internal.signal, req.signal)
+          : internal.signal,
       });
     } catch (err: any) {
       clearTimeout(deadline);
-      throw new ProviderNetworkError(`Network error: ${err?.message ?? String(err)}`);
+      throw classifyUpstreamError({
+        name: err?.name,
+        provider: 'openai-compatible',
+        message: err?.message ?? String(err),
+        cause: err,
+      });
     }
     clearTimeout(deadline);
     if (response.status === 401 || response.status === 403) {
-      throw new ProviderAuthError(`Invalid API key (HTTP ${response.status})`);
+      throw classifyUpstreamError({
+        upstreamStatus: response.status,
+        provider: 'openai-compatible',
+        message: `Invalid API key (HTTP ${response.status})`,
+      });
     }
     if (!response.ok) {
-      throw new ProviderNetworkError(
-        `Provider responded ${response.status} ${response.statusText}`,
-      );
+      throw classifyUpstreamError({
+        upstreamStatus: response.status,
+        provider: 'openai-compatible',
+        message: `Provider responded ${response.status} ${response.statusText}`,
+      });
     }
     // 200 + valid JSON body = reachable. We don't validate the response shape
     // because OpenAI-compat providers vary wildly; status 200 is enough.
   }
+}
+
+/**
+ * Build a combined `AbortSignal` that fires when EITHER of its inputs
+ * fires. We use this to merge the upstream deadline signal with the
+ * caller's signal in the test-connection probe.
+ */
+function mergeSignals(
+  a: AbortSignal,
+  b: AbortSignal,
+): AbortSignal {
+  const c = new AbortController();
+  if (a.aborted || b.aborted) c.abort();
+  const onAbort = () => {
+    if (!a.aborted) a.addEventListener('abort', onAbort, { once: true });
+    if (!b.aborted) b.addEventListener('abort', onAbort, { once: true });
+    c.abort();
+  };
+  a.addEventListener('abort', onAbort, { once: true });
+  b.addEventListener('abort', onAbort, { once: true });
+  return c.signal;
 }

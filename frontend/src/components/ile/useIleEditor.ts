@@ -79,8 +79,15 @@ export interface IleEditorState {
    * along on the next `send()` and are then cleared.
    */
   attachedAssets: AttachedAsset[];
+  /**
+   * The HTML the most recently COMPLETED AI turn produced. Cleared
+   * when the teacher manually edits or accepts a different version.
+   * Used by the chat pane's diff view to render a before/after.
+   */
+  lastAppliedHtml?: string;
 }
 
+export type IleEditorApi = UseIleEditorApi;
 export interface UseIleEditorApi {
   state: IleEditorState;
   /**
@@ -134,6 +141,36 @@ export interface UseIleEditorApi {
   detachAsset: (id: string) => void;
   /** Drop all attached assets (typically after a successful send). */
   clearAttachedAssets: () => void;
+  /**
+   * Accept the most recent AI turn. The current `stream.html` becomes
+   * the new baseline (the diff is dropped). No-op while streaming.
+   */
+  accept: () => void;
+  /**
+   * Reject the most recent AI turn. Restores `lastAppliedHtml` (or the
+   * pre-stream baseline) into the editor's `manualHtml` so the
+   * teacher sees the previous version again. No-op while streaming.
+   */
+  reject: () => void;
+  /**
+   * Re-send the user's most recent prompt against the current head.
+   * Appends a fresh assistant bubble; the previous one stays in
+   * history so the teacher can switch back via the diff toggle.
+   */
+  retry: () => Promise<void>;
+  /**
+   * Fork the conversation at a given message index. Trims all
+   * messages after `index` and sets the editor back to the HTML
+   * that was current at that turn. Used by the "Fork from here"
+   * button on an assistant bubble.
+   */
+  forkFromIndex: (index: number) => void;
+  /**
+   * Hydrate the chat history from a previously-persisted snapshot.
+   * The workspace calls this on mount when localStorage has a
+   * saved session for the current experience.
+   */
+  hydrateMessages: (messages: ChatMessage[]) => void;
   /** True when an undo is available — for greying the toolbar button. */
   canUndo: boolean;
   /** True when a redo is available. */
@@ -488,6 +525,70 @@ export function useIleEditor(): UseIleEditorApi {
     setAttachedAssets([]);
   }, []);
 
+  // ───────────────────────────────────────────────────────────────────
+  // Accept / Reject / Retry / Fork / Hydrate
+  //
+  // These four operations form the "version control" surface of the
+  // chat. They all read/write through the same `headHtmlRef` and
+  // `messages` state so the diff view in ChatPane has consistent
+  // before/after snapshots regardless of which action the teacher took.
+
+  /** Accept: snapshot the current stream.html as the new baseline. */
+  const accept = useCallback(() => {
+    setStream((s) => {
+      if (s.status === 'streaming') return s;
+      return { ...s, lastAppliedHtml: s.html };
+    });
+  }, []);
+
+  /** Reject: restore the pre-stream baseline into manualHtml-equivalent.
+   * We don't have access to the workspace's `setManualHtml` from
+   * here, so the chat pane wires `reject` itself and just clears
+   * the applied flag. */
+  const reject = useCallback(() => {
+    setStream((s) => {
+      if (s.status === 'streaming') return s;
+      return { ...s, lastAppliedHtml: undefined };
+    });
+  }, []);
+
+  /**
+   * Ref to the latest user-submitted prompt. Updated on every send
+   * (callers must do this — the chat pane owns the onSubmit flow).
+   * `retry()` reads this ref so the teacher can re-send without the
+   * retry having to know about React state ordering.
+   */
+  const latestRetryPromptRef = useRef<string>('');
+
+  /** Retry: re-send the most recent user message. */
+  const retry = useCallback(async () => {
+    const latest = latestRetryPromptRef.current;
+    if (!latest) return;
+    await send(latest);
+  }, [send]);
+
+  /** Fork: trim the messages array at `index` and rewind the head
+   * to the HTML the teacher was looking at before that turn. The
+   * chat pane owns the manualHtml reset; we just trim messages. */
+  const forkFromIndex = useCallback((index: number) => {
+    setMessages((ms) => ms.slice(0, index));
+  }, []);
+
+  /** Hydrate messages from a persisted snapshot (called by the
+   * workspace on mount with a localStorage-loaded list). */
+  const hydrateMessages = useCallback((persisted: ChatMessage[]) => {
+    setMessages(persisted);
+  }, []);
+
+  /**
+   * Writer-side access to the latest-user-prompt ref. The chat pane
+   * calls this on every submit so retry() always has a fresh
+   * string to resend.
+   */
+  const setLatestRetryPrompt = useCallback((prompt: string) => {
+    latestRetryPromptRef.current = prompt;
+  }, []);
+
   const sendQuickAction = useCallback(
     async (id: QuickActionId, followupValue?: string) => {
       const instruction = resolveInstruction(id, followupValue);
@@ -607,6 +708,12 @@ export function useIleEditor(): UseIleEditorApi {
     attachAsset,
     detachAsset,
     clearAttachedAssets,
+    accept,
+    reject,
+    retry,
+    forkFromIndex,
+    hydrateMessages,
+    setLatestRetryPrompt,
     canUndo: undoStack.length > 0,
     canRedo: redoStack.length > 0,
   };
