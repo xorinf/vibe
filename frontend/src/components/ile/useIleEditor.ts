@@ -17,6 +17,12 @@ export interface ChatMessage extends IleHistoryTurn {
    * apply a streaming indicator per-message rather than globally.
    */
   inFlight?: boolean;
+  /**
+   * Optional stable id used by the React key strategy. New messages
+   * minted in the editor hook get one; messages hydrated from server
+   * history don't (we fall back to the role+createdAt composite).
+   */
+  _msgId?: string;
 }
 
 /**
@@ -125,6 +131,12 @@ export interface UseIleEditorApi {
 
 const MAX_HISTORY = 8; // chat bubbles shown at once
 const MAX_UNDO = 50;  // undo/redo depth — generous, snaps don't accumulate fast
+
+// Cheap monotonic-ish id for new chat messages. Good enough to anchor
+// React keys; we don't need crypto-strength uniqueness.
+function cryptoRandomId(): string {
+  return `m_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 /**
  * Composable editor hook. Wraps the streaming transport and adds:
@@ -252,9 +264,10 @@ export function useIleEditor(): UseIleEditorApi {
       });
       setRedoStack([]); // any new edit invalidates redo
 
-      // Optimistic user message — surfaces immediately. The backend
-      // will also persist it to history but the optimistic write gives
-      // an instant bubble.
+      // Use a stable id per message so React doesn't shuffle the chat
+      // thread on every streaming update. Assembling messages get an
+      // explicit id; replayed history messages fall back to a content-
+      // anchored id generated server-side is a future improvement.
       //
       // If the teacher has attached assets, we add a "Attached assets"
       // footer to the user message so the chat bubble shows what's
@@ -278,7 +291,11 @@ export function useIleEditor(): UseIleEditorApi {
         inFlight: true,
       };
       inFlightMsgIdRef.current = 'assistant';
-      setMessages((m) => [...m, userMsg, assistantMsg]);
+      setMessages((m) => [
+        ...m,
+        { ...userMsg, _msgId: cryptoRandomId() },
+        { ...assistantMsg, _msgId: 'inFlight' },
+      ]);
 
       // Attached assets are one-shot — they ride along on this turn and
       // then clear. The teacher can re-attach if needed.
@@ -292,6 +309,7 @@ export function useIleEditor(): UseIleEditorApi {
         lastDeltaAt: Date.now(),
         experienceId:
           args.kind === 'edit' ? args.experienceId : undefined,
+        truncated: false,
       });
       setEditing(true);
       setPending(false);

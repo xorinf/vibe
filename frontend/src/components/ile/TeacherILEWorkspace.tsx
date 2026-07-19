@@ -302,9 +302,11 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
             variant="ghost"
             size="sm"
             onClick={handleBack}
+            aria-label="Back"
             className="gap-1 text-slate-600"
           >
-            <ArrowLeft className="h-3.5 w-3.5" /> Back
+            <ArrowLeft className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Back</span>
           </Button>
           <div className="flex items-center gap-2">
             <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-violet-100 text-violet-700">
@@ -375,6 +377,7 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
               variant="ghost"
               onClick={() => navigate('/teacher/ile')}
               className="h-7 gap-1 px-2 text-xs text-slate-500 hover:text-slate-900"
+              aria-label="Open experience library"
               title="All experiences"
             >
               <ExternalLink className="h-3.5 w-3.5" />

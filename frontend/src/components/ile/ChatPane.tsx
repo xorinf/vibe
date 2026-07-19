@@ -129,16 +129,21 @@ export function ChatPane({
         {/* Chat thread */}
         <ol className="space-y-3">
           {state.messages.map((m, idx) => (
-            <MessageBubble key={`${m.role}-${idx}-${m.createdAt ?? ''}`} message={m} />
+            <MessageBubble
+              key={m._msgId ?? `${m.role}-${idx}-${m.createdAt ?? ''}`}
+              message={m}
+            />
           ))}
           {/* Streaming progress as its own compact pill, separate from
               the message bubbles so the teacher can see what's about to
-              land. */}
+              land. We keep ALL recent progress messages (up to 8) — the
+              max dispatched by the server — so the final step never
+              drops off. */}
           {isStreaming && state.stream.progress.length > 0 && (
             <li className="ml-8">
               <ul className="space-y-1">
-                {state.stream.progress.slice(-3).map((msg, idx) => {
-                  const isLast = idx === state.stream.progress.slice(-3).length - 1;
+                {state.stream.progress.map((msg, idx) => {
+                  const isLast = idx === state.stream.progress.length - 1;
                   return (
                     <li
                       key={`${msg}-${idx}`}
@@ -148,7 +153,7 @@ export function ChatPane({
                       )}
                     >
                       <span className="mt-0.5 text-emerald-600">
-                        {isLast ? (
+                        {isLast && !state.stream.reasoning ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
                         ) : (
                           '✓'
