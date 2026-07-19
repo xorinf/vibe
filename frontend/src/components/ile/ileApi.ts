@@ -33,6 +33,9 @@ export interface IleExperienceResponse {
   _id: string;
   title: string;
   html: string;
+  /** Original prompt the teacher used to generate / edit. Server returns it
+   *  on every save/get so reloads preserve the seed context. */
+  prompt: string;
   status: 'draft' | 'published' | 'archived';
   courseId: string;
   courseVersionId: string;
@@ -644,7 +647,17 @@ export type IleStreamEvent =
   | { kind: 'progress'; message: string }
   | { kind: 'reasoning' }
   | { kind: 'html'; delta: string }
-  | { kind: 'done'; experienceId: string; html: string }
+  | {
+      kind: 'done';
+      experienceId: string;
+      html: string;
+      /**
+       * True when the provider cut the response off at max_tokens rather
+       * than emitting a natural end. UI should warn the teacher that the
+       * saved draft is incomplete and offer to retry with a larger cap.
+       */
+      truncated?: boolean;
+    }
   | { kind: 'error'; message: string };
 
 export interface GenerateArgs {
