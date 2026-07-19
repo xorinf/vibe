@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   IFRAME_MSG_TYPES,
   VIBE_IFRAME_CSP,
@@ -64,6 +64,12 @@ export function SandboxIframe({
   onAnalytics,
 }: SandboxIframeProps) {
   const [loaded, setLoaded] = useState(false);
+  // The most recent html we successfully pushed into the iframe.
+  // We compare every incoming `html` prop against this to decide
+  // whether to call `vibe.setContent` (fast in-place update) or
+  // bump the `key` so React remounts the iframe with a fresh srcdoc.
+  const lastSentRef = useRef<string>('');
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const srcdoc = useMemo(() => {
     const safe = html ?? '';
@@ -72,6 +78,37 @@ export function SandboxIframe({
     }
     return wrapWithSandbox(safe, injectSdk, experienceId);
   }, [html, injectSdk, experienceId]);
+
+  // Live update: when `html` changes AFTER the iframe has booted, prefer
+  // the runtime's `vibe.setContent` over a srcdoc remount. This keeps
+  // any in-flight runtime state (autoplaying audio, animation frame
+  // index, scroll position outside the swapped content) intact.
+  //
+  // We only do this when the SDK is injected (student-side) and the
+  // html is non-empty. For the teacher preview (injectSdk={false})
+  // and the blank-state doc, fall through to the srcdoc path.
+  useEffect(() => {
+    const safe = html ?? '';
+    if (!injectSdk) return;
+    if (!safe.trim()) return;
+    if (!loaded) return;
+    if (lastSentRef.current === safe) return;
+    const win = iframeRef.current?.contentWindow as (Window & {
+      vibe?: { setContent?: (html: string) => void };
+    }) | null;
+    if (!win || typeof win.vibe?.setContent !== 'function') return;
+    try {
+      win.vibe.setContent(safe);
+      lastSentRef.current = safe;
+    } catch (err) {
+      // If the runtime threw (e.g. document.write blocked by CSP),
+      // fall through to the srcdoc path so the user still sees an
+      // update. We deliberately do NOT remount — the iframe is
+      // already in a usable state.
+      // eslint-disable-next-line no-console
+      console.warn('[SandboxIframe] vibe.setContent failed; falling back to srcdoc', err);
+    }
+  }, [html, loaded, injectSdk]);
 
   // Listen for postMessage events from the sandboxed iframe.
   useEffect(() => {
@@ -115,6 +152,7 @@ export function SandboxIframe({
   return (
     <div className={className}>
       <iframe
+        ref={iframeRef}
         key={remountKey}
         title="Interactive Experience preview"
         // sandbox without allow-same-origin means the iframe gets an opaque
@@ -158,7 +196,17 @@ function wrapWithSandbox(
 
   // Inject CSP + (optionally) the runtime SDK by rewriting the <head>.
   // If the document doesn't have one, add it.
-  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${VIBE_IFRAME_CSP}">`;
+  //
+  // The CSP contains a `__VIBE_CSP_REPORT_URI__` placeholder that we
+  // substitute here so the runtime knows where to POST violation
+  // reports. We default to `/api/interactive-experiences/csp-report`
+  // (relative to the parent's origin); deployment can override by
+  // setting `VITE_ILE_CSP_REPORT_URI` at build time.
+  const cspReportUri =
+    (import.meta.env.VITE_ILE_CSP_REPORT_URI as string | undefined) ??
+    '/api/interactive-experiences/csp-report';
+  const cspPolicy = VIBE_IFRAME_CSP.replace('__VIBE_CSP_REPORT_URI__', cspReportUri);
+  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${cspPolicy}">`;
   // Substitute the placeholder with the real experience id (or '' if
   // not bound yet). The empty string is a safe default because the
   // server falls back to the path parameter.
@@ -190,11 +238,17 @@ function wrapWithSandbox(
 }
 
 function makeBlankDoc(message: string, experienceId?: string) {
+  // Mirror the CSP report-uri substitution used in the main path so
+  // the blank-state iframe also reports violations to the right URL.
+  const cspReportUri =
+    (import.meta.env.VITE_ILE_CSP_REPORT_URI as string | undefined) ??
+    '/api/interactive-experiences/csp-report';
+  const cspPolicy = VIBE_IFRAME_CSP.replace('__VIBE_CSP_REPORT_URI__', cspReportUri);
   return `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="${VIBE_IFRAME_CSP}">
+<meta http-equiv="Content-Security-Policy" content="${cspPolicy}">
 <style>
   html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
   .empty { display: flex; align-items: center; justify-content: center; height: 100%;

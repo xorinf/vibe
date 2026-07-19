@@ -145,6 +145,41 @@ export const VIBE_RUNTIME_SNIPPET = `
     /** Force-flush the analytics buffer. Optional — the runtime auto-
      *  flushes on lifecycle events. Useful for tests. */
     flushAnalytics: flush,
+    /**
+     * In-place content update. Called by the host when the teacher
+     * types in the code editor. We use document.open() + write() +
+     * close() so the iframe's JavaScript runtime is wiped but the
+     * parent.postMessage channel stays open, the CSP stays in effect,
+     * and the analytics buffer flushes (so events from the previous
+     * content land before the new document loads).
+     *
+     * Why not iframe.srcdoc = ...? Some browsers treat that as a
+     * full navigation, which drops our postMessage listeners AND
+     * any in-flight analytics. document.open is the spec-blessed
+     * way to replace the body in place.
+     */
+    setContent: function(html){
+      try {
+        // Capture a snapshot of the buffer BEFORE we destroy the
+        // document — the flush() call below uses parent, which is
+        // still valid as long as the host hasn't navigated.
+        flush();
+        document.open();
+        document.write(html);
+        document.close();
+        // After close, the browser parses + executes the new doc.
+        // Our runtime snippet is re-injected on the next load (the
+        // teacher has to re-add vibe.* listeners, but they were
+        // already in the new HTML). We do NOT try to preserve
+        // listener state — the teacher's manual edits are the new
+        // truth, and the previous runtime is gone.
+      } catch (e) {
+        // Defensive: if document.write fails (e.g. CSP forbids it),
+        // fall back to a full reload via the host by sending an
+        // error event. The host can decide to remount.
+        send('error', { message: 'setContent failed: ' + (e && e.message) });
+      }
+    },
   };
   // 'started' fires the first time the runtime loads — the host turns
   // this into the persistence row.
@@ -184,4 +219,15 @@ export const VIBE_IFRAME_CSP =
   "connect-src 'none'; " +
   "object-src 'none'; " +
   "base-uri 'none'; " +
-  "form-action 'none';";
+  "form-action 'none'; " +
+  // CSP violation reports are POSTed to the platform's reporting
+  // endpoint so a hostile or buggy experience gets logged centrally.
+  // The report-uri is appended to the strict policy; the API base is
+  // derived at runtime from the ILE_API_BASE env (Vite exposes
+  // import.meta.env.VITE_BASE_URL). When the base is empty (local dev
+  // without a proxy), we fall back to a relative path — the browser
+  // resolves it against the iframe's own opaque origin and the report
+  // will 404 silently, which is the right behaviour for a no-CSP-target
+  // local dev.
+  // The placeholder is substituted at runtime by SandboxIframe.
+  "report-uri __VIBE_CSP_REPORT_URI__;";

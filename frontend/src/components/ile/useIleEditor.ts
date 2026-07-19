@@ -95,6 +95,17 @@ export interface UseIleEditorApi {
    */
   setFreshCanvas: (ctx: { courseId: string; courseVersionId: string; itemId?: string }) => void;
   /**
+   * Push a new head value into the editor WITHOUT resetting undo/redo
+   * or history. Used by the workspace when the teacher types in the
+   * code editor — the AI edit path needs to see the latest manual
+   * content as its base, but we don't want to drop the undo stack.
+   *
+   * The chat message that "Reverted to the previous version" still
+   * uses the canonical undo/redo; this method is only for keeping
+   * `headHtmlRef.current` in sync with the workspace's editor state.
+   */
+  setHead: (html: string) => void;
+  /**
    * Send a free-form edit. If the editor is in freshCanvas mode this
    * runs the create path; otherwise it runs the edit path.
    */
@@ -204,7 +215,15 @@ export function useIleEditor(): UseIleEditorApi {
   );
 
   // ───────────────────────────────────────────────────────────────────
-  // setFreshCanvas: called when the workspace is opened with no id.
+  // setHead: sync the AI's "base" HTML with whatever the teacher just
+  // typed in the code editor. We don't reset undo/redo or history here
+  // — the AI's undo stack is independent of the editor's. We also don't
+  // touch the stream state (status / progress / messages) because the
+  // teacher is still mid-typing; the next AI send() will read from
+  // the updated head.
+  const setHead = useCallback((html: string) => {
+    headHtmlRef.current = html;
+  }, []);
   const setFreshCanvas = useCallback(
     (ctx: { courseId: string; courseVersionId: string; itemId?: string }) => {
       setCourseId(ctx.courseId);
@@ -577,6 +596,7 @@ export function useIleEditor(): UseIleEditorApi {
     },
     setExperience,
     setFreshCanvas,
+    setHead,
     send,
     sendAsEdit,
     sendAsGenerate,

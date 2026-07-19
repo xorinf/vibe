@@ -1,16 +1,34 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Sparkles, History as HistoryIcon, ExternalLink, Paperclip, Check } from 'lucide-react';
+import {
+  ArrowLeft,
+  Sparkles,
+  History as HistoryIcon,
+  ExternalLink,
+  Paperclip,
+  Check,
+  Code,
+  Eye,
+  Columns2,
+  Search,
+  Undo2,
+  Redo2,
+  WrapText,
+  Save,
+  CircleAlert,
+  Wand2,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/utils/utils';
 import { ChatPane } from './ChatPane';
-import { PreviewPane } from './PreviewPane';
+import { type CodeEditorHandle } from './CodeEditor';
 import { MetadataPane } from './MetadataPane';
 import { AiConfigPanel } from './AiConfigPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { ActionsMenu } from './ActionsMenu';
 import { AssetManager } from './AssetManager';
+import { EditorSplitPane } from './EditorSplitPane';
 import { useIleEditor } from './useIleEditor';
 import {
   getIleExperience,
@@ -148,10 +166,147 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
 
   // ───────────────────────────────────────────────────────────────────
   // Save / publish / lifecycle (unchanged from previous design)
+  //
+  // The save flow is now driven by either:
+  //   - the teacher's manual edits in the code editor (auto-save)
+  //   - the AI finishing a stream that diverged from the last save
+  // Both paths funnel through the same `effectiveHtml` so the backend
+  // sees a single canonical document.
+  const [viewMode, setViewMode] = useState<'code' | 'split' | 'preview'>(
+    () => {
+      if (typeof window === 'undefined') return 'split';
+      const stored = window.localStorage.getItem('ile.workspace.viewMode');
+      if (stored === 'code' || stored === 'split' || stored === 'preview') {
+        return stored;
+      }
+      return 'split';
+    },
+  );
+  const [wordWrap, setWordWrap] = useState<boolean>(
+    () => window.localStorage.getItem('ile.workspace.wordWrap') !== 'false',
+  );
+
+  // The latest HTML the teacher has hand-typed. When null, no manual
+  // edit has happened yet and the preview/AI/auto-save chain defers
+  // to the AI-streamed value. When set, it overrides the stream for
+  // preview AND becomes the base the next AI edit operates on.
+  const [manualHtml, setManualHtml] = useState<string | null>(null);
+
+  // Stable ref to the editor so the workspace can imperatively
+  // setValue when an AI stream finishes (and reset other UI bits).
+  const editorHandleRef = useRef<CodeEditorHandle | null>(null);
+
+  // The HTML the preview + auto-save will read. Priority:
+  //   1. Manual edit (if the teacher has typed)
+  //   2. AI stream output (most recent done/still-streaming)
+  //   3. Initial loaded HTML
+  //   4. Last-saved server HTML
+  // Manual edits always win so the preview reflects what the teacher
+  // sees in the code editor.
+  const effectiveHtml =
+    manualHtml ??
+    (editorState.stream.status === 'done' || editorState.stream.status === 'streaming'
+      ? editorState.stream.html
+      : '') ??
+    editorState.initialHtml ??
+    saved?.html ??
+    '';
+
+  // Whenever the AI stream finishes or the saved snapshot updates,
+  // sync the imperative editor. We skip the sync when the teacher
+  // is mid-typing (manualHtml differs from the new stream value)
+  // because we don't want to clobber an in-flight edit.
+  useEffect(() => {
+    if (editorState.stream.status === 'done') {
+      const streamHtml = editorState.stream.html;
+      // Only push when (a) no manual edit, or (b) the manual edit
+      // matches the stream — i.e. an undo that took us back to the
+      // pre-stream state.
+      if (manualHtml === null || manualHtml === streamHtml) {
+        editorHandleRef.current?.setValue(streamHtml);
+        setManualHtml(null);
+        // Keep the AI's view of the head in sync so a follow-up edit
+        // starts from the right place.
+        editor.setHead(streamHtml);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorState.stream.status, editorState.stream.html]);
+
+  // When the saved snapshot arrives (initial load), seed the editor.
+  useEffect(() => {
+    if (saved?.html && manualHtml === null) {
+      editorHandleRef.current?.setValue(saved.html);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saved?._id]);
+
+  // Whenever the teacher types, mirror into the AI's head so the
+  // next send() uses the latest manual content.
+  const handleCodeChange = useCallback(
+    (next: string) => {
+      setManualHtml(next);
+      editor.setHead(next);
+      // Mark the workspace as dirty for the unsaved-changes guard.
+      // We do NOT auto-save immediately — that's a separate debounced
+      // effect (see handleEditorAutoSave below).
+    },
+    [editor],
+  );
+
+  // Persist view preferences when they change.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('ile.workspace.viewMode', viewMode);
+    } catch {
+      /* private mode — ignore */
+    }
+  }, [viewMode]);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        'ile.workspace.wordWrap',
+        wordWrap ? '1' : '0',
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [wordWrap]);
+
+  // ───────────────────────────────────────────────────────────────────
+  // Auto-save. Debounced 1.5s after the last manual edit. We don't
+  // auto-save while the AI is streaming (the teacher is likely waiting
+  // for the next prompt) or when the saved doc already matches.
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (manualHtml === null) return;
+    // Don't race the AI.
+    if (editorState.stream.status === 'streaming') return;
+    // The dev has nothing to save yet.
+    if (!editorState.stream.experienceId) return;
+    // Already saved at this exact value.
+    if (manualHtml === saved?.html) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      // Save without blocking the UI. The handleSave callback also
+      // does its own work; this just kicks it off on a delay.
+      void handleSaveRef.current?.();
+    }, 1500);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualHtml, editorState.stream.status]);
+
+  // A ref to handleSave so the auto-save timer always calls the
+  // latest version (handleSave's deps would otherwise need to be
+  // mirrored in the timer effect, which causes spurious runs).
+  const handleSaveRef = useRef<() => Promise<void> | undefined>(undefined);
+
   const isDirty =
     editorState.stream.status === 'done' &&
-    editorState.stream.html.length > 0 &&
-    editorState.stream.html !== (saved?.html ?? '');
+    effectiveHtml.length > 0 &&
+    effectiveHtml !== (saved?.html ?? '');
 
   useEffect(() => {
     if (!isDirty) return;
@@ -172,7 +327,9 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
   }, [isDirty, navigate]);
 
   const handleSave = useCallback(async () => {
-    const html = editorState.stream.html;
+    // Save whatever the teacher is currently looking at — manual
+    // edits take priority; the AI stream value is the fallback.
+    const html = manualHtml ?? editorState.stream.html;
     if (!html) {
       toast.error('Nothing to save yet — generate or edit first.');
       return;
@@ -209,7 +366,12 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
     title,
     saved?.prompt,
     navigate,
+    manualHtml,
   ]);
+
+  // The auto-save timer fires `handleSaveRef.current?.()` so it always
+  // calls the latest version. Mirror it here after every render.
+  handleSaveRef.current = handleSave;
 
   // Keyboard shortcut: Cmd/Ctrl+S saves the draft. We only fire when the
   // workspace owns focus (i.e. inputs inside the chat composer don't
@@ -280,16 +442,10 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
     [saved, navigate],
   );
 
-  // The preview always shows the editor's view of the world. The editor
-  // holds the "head" html that we've either hydrated or generated. The
-  // workspace doesn't need to know about the underlying transport.
-  const htmlForPreview =
-    editorState.stream.html || editorState.initialHtml || saved?.html || '';
-
-  // The chat pane routes the first submit through generate() or send()
-  // based on whether an experience is bound. We mirror that flag here
-  // so the composer placeholder + the "iterating" badge stay coherent.
-  const hasExperience = Boolean(editorState.stream.experienceId);
+  // (legacy htmlForPreview variable removed — the EditorSplitPane now
+  //  receives effectiveHtml directly from this workspace.)
+  // (removed the legacy `hasExperience` flag — the EditorSplitPane
+  //  reads the experience id directly off editorState.stream.)
 
   const isConfigured = configState === 'configured';
   const forceConfigExpand = configState !== 'configured';
@@ -411,8 +567,17 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
               : 'Save the form above to enable generation. Your key is stored per teacher.'
           }
         />
-        <PreviewPane
-          state={editorState.stream.status !== 'idle' ? editorState.stream : { ...editorState.stream, html: htmlForPreview }}
+        <EditorSplitPane
+          editorHandleRef={editorHandleRef}
+          streamState={editorState.stream}
+          effectiveHtml={effectiveHtml}
+          isStreaming={editorState.stream.status === 'streaming'}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          wordWrap={wordWrap}
+          onWordWrapChange={setWordWrap}
+          onCodeChange={handleCodeChange}
+          experienceId={editorState.stream.experienceId}
         />
         <MetadataPane
           state={editorState.stream}
@@ -453,5 +618,6 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
           />
         </div>
       )}
+    </div>
   );
 }
