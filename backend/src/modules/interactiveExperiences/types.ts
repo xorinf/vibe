@@ -15,6 +15,11 @@ const TYPES = {
   IleAssetService: Symbol.for('IleAssetService'),
   IleStudentProgressRepository: Symbol.for('IleStudentProgressRepository'),
   IleAnalyticsService: Symbol.for('IleAnalyticsService'),
+  Keystore: Symbol.for('IleKeystore'),
+  ContextBuilder: Symbol.for('IleContextBuilder'),
+  ContextProviderRegistry: Symbol.for('IleContextProviderRegistry'),
+  TranscriptCleaner: Symbol.for('IleTranscriptCleaner'),
+  YouTubeContextProvider: Symbol.for('YouTubeContextProvider'),
 };
 
 export { TYPES as ILE_TYPES };

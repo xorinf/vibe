@@ -6,6 +6,7 @@ import {
 import { sharedContainerModule } from '#root/container.js';
 import { InversifyAdapter } from '#root/inversify-adapter.js';
 import { ileContainerModule } from './container.js';
+import { ILE_TYPES } from './types.js';
 import { IleController } from './controllers/IleController.js';
 import {
   GenerateIleBody,
@@ -21,6 +22,7 @@ import {
   IngestStudentEventsBody,
   IngestStudentEventsQuery,
 } from './classes/validators/IleAnalyticsValidators.js';
+import { GenerateFromContextBody } from './classes/validators/ContextValidators.js';
 
 export const interactiveExperiencesContainerModules: ContainerModule[] = [
   ileContainerModule,
@@ -40,6 +42,7 @@ export const interactiveExperiencesModuleValidators: Function[] = [
   TestIleAiConfigBody,
   IngestStudentEventsBody,
   IngestStudentEventsQuery,
+  GenerateFromContextBody,
 ];
 
 export const interactiveExperiencesModuleOptions: RoutingControllersOptions = {
@@ -58,4 +61,18 @@ export async function setupInteractiveExperiencesContainer(): Promise<void> {
   await container.load(...interactiveExperiencesContainerModules);
   const inversifyAdapter = new InversifyAdapter(container);
   useContainer(inversifyAdapter);
+
+  // Register context providers with the registry, in priority order.
+  // More specific providers (YouTube URL detection) MUST register
+  // before generic ones (e.g. a future 'website' provider). The
+  // registry is a process-wide singleton so each provider is bound
+  // once and reused for every request.
+  const registry = container.get<import('./context/ContextProviderRegistry.js').ContextProviderRegistry>(
+    ILE_TYPES.ContextProviderRegistry,
+  );
+  registry.register(
+    container.get<import('./context/providers/YouTubeContextProvider.js').YouTubeContextProvider>(
+      ILE_TYPES.YouTubeContextProvider,
+    ),
+  );
 }
