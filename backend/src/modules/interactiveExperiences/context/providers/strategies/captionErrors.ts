@@ -15,12 +15,24 @@ export function isUnavailableMessage(m: string): boolean {
   );
 }
 
+/**
+ * Detect region-block / private / age-restricted errors. The matchers
+ * are intentionally a bit loose because YouTube's error surface has
+ * shifted several times — better to catch the common phrasings and
+ * occasionally over-flag a transient as unsupported than to surface
+ * the wrong user message.
+ */
 export function isUnsupportedMessage(m: string): boolean {
   const s = m.toLowerCase();
   return (
     s.includes('private video') ||
     s.includes('video unavailable') ||
     s.includes('not available in your country') ||
+    s.includes('available in your country') ||
+    // "has not made this video available in your country" — common
+    // alternate phrasing. Matches if the error mentions BOTH "not"
+    // (anywhere) and "in your country".
+    (s.includes(' not ') && s.includes('in your country')) ||
     s.includes('sign in to confirm') ||
     s.includes('age-restricted') ||
     s.includes('age restricted')
