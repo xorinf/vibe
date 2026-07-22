@@ -59,7 +59,7 @@ frontend/openapi.json
 .vibe.json
 
 .venv
-
+.hermes/AGENT.md
 mcp
 frontend/public/models
 dist/
@@ -93,6 +93,9 @@ backend/html/
 
 # Local PR draft notes
 .pr-*.md
+
+# Hermes local implementation notes
+.hermes/plans/
 
 # Firebase hosting cache
 .firebase/
