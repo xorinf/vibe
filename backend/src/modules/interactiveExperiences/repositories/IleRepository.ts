@@ -1,6 +1,7 @@
-import { injectable } from 'inversify';
+import { injectable, inject } from 'inversify';
 import { Collection, ObjectId } from 'mongodb';
 import { MongoDatabase } from '#shared/database/index.js';
+import { GLOBAL_TYPES } from '#root/types.js';
 import { IleExperience, IleStatus, IleVersion } from '../classes/transformers/IleExperience.js';
 
 const COLLECTION = 'interactive_experiences';
@@ -16,7 +17,7 @@ const COLLECTION = 'interactive_experiences';
  */
 @injectable()
 export class IleRepository {
-  constructor(private readonly db: MongoDatabase) {}
+  constructor(@inject(GLOBAL_TYPES.Database) private readonly db: MongoDatabase) {}
 
   private async col(): Promise<Collection<IleExperience>> {
     return this.db.getCollection<IleExperience>(COLLECTION);
@@ -161,8 +162,9 @@ export class IleRepository {
 
     return { version: assignedVersion };
   }
-
-  /** Update an existing version's optional label without changing its content. */
+  /**
+   * Update an existing version's optional label without changing its content.
+   */
   async labelVersion(
     id: string,
     version: number,
@@ -181,6 +183,32 @@ export class IleRepository {
         },
       },
     );
+  }
+
+  /**
+   * Set the lightweight context reference on an experience. We persist
+   * ONLY the provenance-shaped `IleContextRef` (source, sourceUrl,
+   * title, provider, transcriptHash, createdAt) — never the raw
+   * transcript. Future regenerations rebuild the context from
+   * `sourceUrl`.
+   */
+  async setContext(
+    id: string,
+    context: import('../classes/transformers/IleExperience.js').IleContextRef,
+  ): Promise<IleExperience | null> {
+    return this.update(id, { context });
+  }
+
+  /** Clear the context reference (used when a teacher regenerates from a different source). */
+  async clearContext(id: string): Promise<IleExperience | null> {
+    if (!ObjectId.isValid(id)) return null;
+    const col = await this.col();
+    const result = await col.findOneAndUpdate(
+      { _id: new ObjectId(id) },
+      { $unset: { context: '' }, $set: { updatedAt: new Date() } },
+      { returnDocument: 'after' },
+    );
+    return this.normalise(result ?? null);
   }
 
   /**

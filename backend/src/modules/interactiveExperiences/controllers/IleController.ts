@@ -45,6 +45,7 @@ import {
   IngestStudentEventsBody,
   IngestStudentEventsQuery,
 } from '../classes/validators/IleAnalyticsValidators.js';
+import { GenerateFromContextBody } from '../classes/validators/ContextValidators.js';
 import {
   IleExperience,
   IleVersion,
@@ -57,6 +58,9 @@ import {
   ILE_ASSET_LIMITS,
 } from '../classes/transformers/IleAsset.js';
 import { IUser } from '#root/shared/interfaces/models.js';
+import { AUTH_TYPES } from '#root/modules/auth/types.js';
+import { IAuthService } from '#root/modules/auth/interfaces/IAuthService.js';
+import { ileLog, newIleRequestId } from '../services/observability.js';
 import {
   IleAiConfigResponse,
   TestConnectionResult,
@@ -122,6 +126,8 @@ class StudentIlePayload {
   _id: string;
   title: string;
   html: string;
+  courseId: string;
+  courseVersionId: string;
 }
 
 class IleErrorResponse {
@@ -173,6 +179,8 @@ export class IleController {
     private readonly ileAsset: IleAssetService,
     @inject(ILE_TYPES.IleAnalyticsService)
     private readonly ileAnalytics: IleAnalyticsService,
+    @inject(AUTH_TYPES.AuthService)
+    private readonly authService: IAuthService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────
@@ -389,9 +397,9 @@ export class IleController {
     @Req() req: Request,
   ): Promise<{ applied: number; studentHash?: string }> {
     // Token priority: explicit header (sent by the host) > Authorization
-    // header > ?token= query. The student token is the raw Firebase
-    // ID token, which we hash + salt server-side — we never persist
-    // the raw value.
+    // header > Authorization header. We verify the Firebase token, resolve
+    // the application user, then hash that stable user id with the
+    // experience id. Tokens rotate; the application user id does not.
     const auth =
       headerToken ||
       (req.headers.authorization?.startsWith('Bearer ')
@@ -402,6 +410,11 @@ export class IleController {
       throw new BadRequestError(
         'Missing student token (X-Vibe-Student-Token header or Authorization Bearer).',
       );
+    }
+
+    const student = await this.authService.getCurrentUserFromToken(auth);
+    if (!student?._id) {
+      throw new BadRequestError('Invalid student token.');
     }
 
     // We need courseId + courseVersionId to scope analytics. The
@@ -415,7 +428,7 @@ export class IleController {
       experienceId: id,
       courseId,
       courseVersionId,
-      authToken: auth,
+      studentId: String(student._id),
       events: body.events,
     });
     return { applied: result.applied, studentHash: result.studentHash };
@@ -483,6 +496,89 @@ export class IleController {
     return this.ileAnalytics.dashboardForExperiences(items);
   }
 
+  /**
+   * Daily time series for one experience. Optional `from` and `to`
+   * query params (ISO date strings) bound the window; otherwise the
+   * last 30 days.
+   */
+  @Get('/:id/analytics/timeseries')
+  @OpenAPI({ summary: 'Teacher view: daily time series for one experience.' })
+  async getTimeSeries(
+    @Param('id') id: string,
+    @QueryParam('from') from: string | undefined,
+    @QueryParam('to') to: string | undefined,
+    @CurrentUser() user: IUser,
+  ): Promise<any> {
+    if (!user?._id) throw new BadRequestError('Authenticated user required');
+    const doc = await this.ile.getOwned(id, String(user._id));
+    if (!doc) throw new NotFoundError('Experience not found');
+    return this.ileAnalytics.timeSeries(id, {
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
+  }
+
+  /**
+   * Drop-off curve for one experience. Returns 11 bins (0..100) plus
+   * the largest single-bin drop so the AI insights layer can flag a
+   * "confusing section" without re-scanning.
+   */
+  @Get('/:id/analytics/dropoff')
+  @OpenAPI({ summary: 'Teacher view: drop-off curve (10% bins) for one experience.' })
+  async getDropOff(
+    @Param('id') id: string,
+    @CurrentUser() user: IUser,
+  ): Promise<any> {
+    if (!user?._id) throw new BadRequestError('Authenticated user required');
+    const doc = await this.ile.getOwned(id, String(user._id));
+    if (!doc) throw new NotFoundError('Experience not found');
+    return this.ileAnalytics.dropOffCurve(id);
+  }
+
+  /**
+   * AI insights. Deterministic rule-based, not an LLM call. Returns
+   * a list of insights with severity, scope (progress range), and a
+   * suggested action. The dashboard renders each as a card.
+   */
+  @Get('/:id/analytics/insights')
+  @OpenAPI({ summary: 'Teacher view: AI insights for one experience.' })
+  async getInsights(
+    @Param('id') id: string,
+    @CurrentUser() user: IUser,
+  ): Promise<any> {
+    if (!user?._id) throw new BadRequestError('Authenticated user required');
+    const doc = await this.ile.getOwned(id, String(user._id));
+    if (!doc) throw new NotFoundError('Experience not found');
+    return this.ileAnalytics.insights(id);
+  }
+
+  /**
+   * Compare A vs B. Both experiences must be owned by the same
+   * teacher (the ile.getOwned checks above enforce it independently).
+   */
+  @Get('/analytics/compare')
+  @OpenAPI({ summary: 'Teacher view: compare A vs B across headline metrics.' })
+  async compare(
+    @QueryParam('a') aId: string | undefined,
+    @QueryParam('b') bId: string | undefined,
+    @CurrentUser() user: IUser,
+  ): Promise<any> {
+    if (!user?._id) throw new BadRequestError('Authenticated user required');
+    if (!aId || !bId) {
+      throw new BadRequestError('Both ?a= and ?b= query params are required.');
+    }
+    const [a, b] = await Promise.all([
+      this.ile.getOwned(aId, String(user._id)),
+      this.ile.getOwned(bId, String(user._id)),
+    ]);
+    if (!a) throw new NotFoundError(`Experience ${aId} not found`);
+    if (!b) throw new NotFoundError(`Experience ${bId} not found`);
+    return this.ileAnalytics.compare(
+      { experienceId: aId, title: a.title },
+      { experienceId: bId, title: b.title },
+    );
+  }
+
   // ───────────────────────────────────────────────────────────────────
   // Generation (existing routes)
 
@@ -516,6 +612,52 @@ export class IleController {
       courseVersionId: body.courseVersionId,
       itemId: body.itemId,
       prompt: body.prompt,
+      requestId: pickRequestId(req),
+    });
+  }
+
+  /**
+   * Stream a generation from external context (YouTube URL in v1).
+   *
+   * The body carries the source identifier and the raw input (URL /
+   * file id). The route delegates to generation.generateFromContext,
+   * which runs the ContextBuilder + reuses the same streaming LLM
+   * pipeline as `generate/stream`.
+   *
+   * Event shape is identical to generate/stream — the teacher sees
+   * 'Preparing context...' / 'Understanding the learning material...' /
+   * 'Generating interactive experience...' / 'Done'.
+   */
+  @Post('/generate/from-context/stream')
+  @OpenAPI({
+    summary: 'Stream a fresh interactive experience generation from external context',
+    responses: {
+      200: {
+        description:
+          'Server-Sent Events stream. Events: start, progress, html, done, error.',
+        content: { 'text/event-stream': {} },
+      },
+      400: { description: 'Invalid source / missing fields' },
+    },
+  })
+  async generateFromContextStream(
+    @Body() body: GenerateFromContextBody,
+    @CurrentUser() user: IUser,
+    @Req() req: Request,
+    @Res() res: Response,
+  ): Promise<void> {
+    if (!user?._id) {
+      throw new BadRequestError('Authenticated user required');
+    }
+    await this.generation.generateFromContext(String(user._id), req, res, {
+      courseId: body.courseId,
+      courseVersionId: body.courseVersionId,
+      itemId: body.itemId,
+      prompt: body.prompt,
+      source: body.source,
+      input: body.input,
+      hint: body.hint,
+      requestId: pickRequestId(req),
     });
   }
 
@@ -544,6 +686,39 @@ export class IleController {
     await this.generation.edit(String(user._id), req, res, {
       experienceId: id,
       prompt: body.prompt,
+      requestId: pickRequestId(req),
+    });
+  }
+
+  /**
+   * CSP violation report. The sandboxed iframe's CSP has a
+   * `report-uri /api/interactive-experiences/csp-report` directive; the
+   * browser POSTs `application/csp-report` (or JSON, depending on
+   * browser) here when a violation fires. We log + acknowledge with
+   * 204 so the report doesn't trigger a retry storm.
+   *
+   * SECURITY: This endpoint is intentionally NOT @Authorized() — CSP
+   * reports come from the iframe which has an opaque origin, and the
+   * rate of false reports is benign. We do, however, cap payload size
+   * to keep a hostile origin from filling our logs.
+   */
+  @Post('/csp-report')
+  @HttpCode(204)
+  @OpenAPI({
+    summary: 'CSP violation report endpoint (browser POST).',
+  })
+  async cspReport(@Body() body: unknown, @Req() req: Request): Promise<void> {
+    const report = extractCspReport(body);
+    ileLog('warn', 'csp.violation', {
+      blockedUri: report.blockedUri,
+      violatedDirective: report.violatedDirective,
+      originalPolicy: report.originalPolicy,
+      documentUri: report.documentUri,
+      lineNumber: report.lineNumber,
+      columnNumber: report.columnNumber,
+      sourceFile: report.sourceFile,
+      disposition: report.disposition,
+      sample: report.sample,
     });
   }
 
@@ -841,6 +1016,8 @@ export class IleController {
       _id: String(payload._id),
       title: payload.title,
       html: payload.html,
+      courseId: payload.courseId,
+      courseVersionId: payload.courseVersionId,
     };
   }
 
@@ -940,4 +1117,90 @@ export class IleController {
       prompt: v.prompt,
     };
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Helpers
+
+/**
+ * Pull a request id off the inbound `X-Request-Id` header, falling
+ * back to a fresh one. The service logs and SSE errors carry the
+ * id so a teacher can quote it in a bug report and we can find the
+ * exact line in the structured log pipeline.
+ */
+function pickRequestId(req: Request): string {
+  const raw = req.headers['x-request-id'];
+  if (typeof raw === 'string' && raw.length > 0 && raw.length <= 128) {
+    return raw;
+  }
+  return newIleRequestId();
+}
+
+/**
+ * Extract the relevant fields from a CSP report payload. Browsers
+ * differ in their format:
+ *
+ *   - The latest spec (Level 3) sends an array of `csp-report` objects
+ *     directly.
+ *   - Older Chrome/Firefox send `{ 'csp-report': { ... } }` wrapped.
+ *   - The legacy `SecurityPolicyViolationEvent` dispatch sends a
+ *     `securitypolicyviolation` event with a DOM-shaped payload.
+ *
+ * We accept all three and surface the most useful fields.
+ */
+function extractCspReport(body: unknown): {
+  blockedUri?: string;
+  violatedDirective?: string;
+  originalPolicy?: string;
+  documentUri?: string;
+  lineNumber?: number;
+  columnNumber?: number;
+  sourceFile?: string;
+  sample?: string;
+  disposition?: string;
+} {
+  const findField = (...objects: any[]): any | undefined => {
+    for (const o of objects) {
+      if (o && typeof o === 'object') {
+        for (const k of Object.keys(o)) {
+          if (k in o) return o[k];
+        }
+      }
+    }
+    return undefined;
+  };
+  const root: any = Array.isArray(body)
+    ? body[0]
+    : body && typeof body === 'object'
+      ? (body as any)['csp-report'] ?? body
+      : undefined;
+  if (!root || typeof root !== 'object') return {};
+  return {
+    blockedUri: stringOrUndef(
+      root['blocked-uri'] ?? root.blockedURI ?? root.blockedUri,
+    ),
+    violatedDirective: stringOrUndef(
+      root['violated-directive'] ??
+        root.violatedDirective ??
+        root.effectiveDirective,
+    ),
+    originalPolicy: stringOrUndef(
+      root['original-policy'] ?? root.originalPolicy,
+    ),
+    documentUri: stringOrUndef(
+      root['document-uri'] ?? root.documentURI ?? root.documentUri,
+    ),
+    lineNumber: numberOrUndef(root['line-number'] ?? root.lineNumber),
+    columnNumber: numberOrUndef(root['column-number'] ?? root.columnNumber),
+    sourceFile: stringOrUndef(root['source-file'] ?? root.sourceFile),
+    sample: stringOrUndef(root['sample']),
+    disposition: stringOrUndef(root.disposition),
+  };
+}
+
+function stringOrUndef(v: unknown): string | undefined {
+  return typeof v === 'string' ? v : undefined;
+}
+function numberOrUndef(v: unknown): number | undefined {
+  return typeof v === 'number' ? v : undefined;
 }

@@ -16,6 +16,33 @@ import { ID } from '#root/shared/interfaces/models.js';
  */
 export type IleStatus = 'draft' | 'published' | 'archived';
 
+/**
+ * Lightweight reference to the source an experience was generated
+ * from. NEVER carries raw transcript content — we always rebuild
+ * transcripts on generate so the storage cost stays flat.
+ *
+ * `source` mirrors the ContextSourceId enum (kept loose here so the
+ * transformer doesn't import the context module and create a cycle).
+ */
+export interface IleContextRef {
+  /** Source identifier, e.g. 'youtube'. */
+  source: string;
+  /** Original input as the teacher provided it (URL, file id). */
+  sourceUrl: string;
+  /** Display title of the source (e.g. YouTube video title). */
+  title: string;
+  /** Which strategy succeeded, e.g. 'creator-captions', 'auto-captions', 'whisper'. */
+  provider: string;
+  /**
+   * SHA-256 of the cleaned transcript text. Used as a future cache
+   * key — two experiences with the same hash were generated from
+   * effectively the same source content.
+   */
+  transcriptHash: string;
+  /** When the context was first extracted. */
+  createdAt: Date;
+}
+
 export interface IleHistoryTurn {
   role: 'user' | 'assistant';
   content: string;
@@ -116,9 +143,20 @@ export class IleExperience {
   @Expose()
   versions: IleVersion[];
 
+  /**
+   * Optional reference to the source this experience was generated
+   * from. The teacher workspace surfaces this as a "Context: …"
+   * chip; the student-facing endpoints strip it out (provenanced
+   * source URLs are an authoring concern, not a learner one).
+   *
+   * No raw transcript is stored here — by design. See README §
+   * Context Provider architecture.
+   */
+  @Expose()
+  context?: IleContextRef;
+
   @Expose()
   createdAt: Date;
-
   @Expose()
   updatedAt: Date;
 
@@ -138,6 +176,7 @@ export class IleExperience {
     this.authorName = init.authorName;
     this.currentVersion = init.currentVersion ?? 0;
     this.versions = init.versions ?? [];
+    this.context = init.context;
     this.createdAt = init.createdAt ?? new Date();
     this.updatedAt = init.updatedAt ?? new Date();
   }

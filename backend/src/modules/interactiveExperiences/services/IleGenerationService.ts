@@ -15,6 +15,13 @@ import {
 } from './providers/types.js';
 import { createProvider } from './providers/index.js';
 import { ileLog } from './observability.js';
+import { ContextBuilder } from '../context/ContextBuilder.js';
+import {
+  CONTEXT_PHASES,
+  ContextPhase,
+  ContextProviderError,
+  GenerationContext,
+} from '../context/types.js';
 
 const SYSTEM_PROMPT = `You are ViBe's Interactive Learning Experience designer.
 Your job is to design a single self-contained interactive HTML experience
@@ -107,6 +114,8 @@ export class IleGenerationService {
     private readonly aiConfig: IleAiConfigService,
     @inject(ILE_TYPES.IleAssetService)
     private readonly assets: IleAssetService,
+    @inject(ILE_TYPES.ContextBuilder)
+    private readonly contextBuilder: ContextBuilder,
   ) {}
 
   /**
@@ -124,13 +133,13 @@ export class IleGenerationService {
    *
    * @param ownerId  Firebase uid of the teacher.
    * @param req      Express request (used for SSE heartbeat / cleanup).
-   * @param res      Express response, configured by sse.init().
+   * @param res      Express response, configured by sse.attach().
    * @param requestId  Structured-log correlation id (optional; one is
    *                  generated if absent).
    */
   async generate(
     ownerId: string,
-    req: Parameters<IleSseService['init']>[0],
+    req: Parameters<IleSseService['attach']>[0],
     res: Response,
     args: {
       courseId: string;
@@ -141,7 +150,7 @@ export class IleGenerationService {
     },
   ): Promise<void> {
     const requestId = args.requestId ?? cryptoRandomId();
-    this.sse.init(req, res);
+    const sse = this.sse.attach(req, res);
 
     // Cancellation wiring:
     //   - `req.on('close')`  — the browser disconnected (closed tab,
@@ -194,7 +203,7 @@ export class IleGenerationService {
 
       // 2. Tell the client we've started. They can already open the preview
       //    iframe — it'll just be empty until 'html' events arrive.
-      this.sse.emit(res, 'start', {
+      sse.emit( 'start', {
         experienceId: String(saved._id),
       });
 
@@ -203,7 +212,7 @@ export class IleGenerationService {
       let nextStep = 0;
       const fireNextStep = () => {
         if (nextStep < PROGRESS_STEPS.length) {
-          this.sse.emit(res, 'progress', { message: PROGRESS_STEPS[nextStep] });
+          sse.emit( 'progress', { message: PROGRESS_STEPS[nextStep] });
           nextStep++;
         }
       };
@@ -215,7 +224,7 @@ export class IleGenerationService {
         system: await this.buildSystemPrompt(ownerId),
         messages: [{ role: 'user', content: args.prompt }],
         temperature: 0.4,
-        maxTokens: 8192,
+        maxTokens: 32768,
         signal: abort.signal,
       });
 
@@ -234,7 +243,7 @@ export class IleGenerationService {
           chunkCount++;
           tokenCount += approximateTokens(chunk.delta);
           responseBytes += Buffer.byteLength(chunk.delta, 'utf8');
-          this.sse.emit(res, 'html', { delta: chunk.delta });
+          sse.emit( 'html', { delta: chunk.delta });
 
           // Fire progress steps as we accumulate HTML.
           if (chunkCount === 8) fireNextStep();
@@ -244,12 +253,12 @@ export class IleGenerationService {
           // Emit a discrete reasoning signal so the UI can render
           // a "Thinking…" pill. The dedup logic in the hook will keep
           // it sticky until the first text delta arrives.
-          this.sse.emit(res, 'reasoning', {});
+          sse.emit( 'reasoning', {});
           lastReasoningFlush += chunk.delta;
           if (lastReasoningFlush.length > 200) {
             // After enough reasoning has flowed, bump the progress UI
             // so the user sees forward motion even before text arrives.
-            this.sse.emit(res, 'progress', {
+            sse.emit( 'progress', {
               message: '✓ Designing experience',
             });
             lastReasoningFlush = '';
@@ -278,7 +287,7 @@ export class IleGenerationService {
           partialTokens: tokenCount,
           elapsedMs: Date.now() - t0,
         });
-        this.sse.emit(res, 'error', {
+        sse.emit( 'error', {
           message: 'Generation cancelled.',
           kind: 'cancelled',
           reason: cancellationReason,
@@ -300,7 +309,7 @@ export class IleGenerationService {
       });
       await this.repo.update(String(saved._id), { html: finalHtml });
 
-      this.sse.emit(res, 'done', {
+      sse.emit( 'done', {
         experienceId: String(saved._id),
         html: finalHtml,
         truncated: truncated || undefined,
@@ -334,7 +343,7 @@ export class IleGenerationService {
           partialTokens: tokenCount,
           elapsedMs: Date.now() - t0,
         });
-        this.sse.emit(res, 'error', {
+        sse.emit( 'error', {
           message: 'Generation cancelled.',
           kind: 'cancelled',
           reason: cancellationReason ?? 'client_abort',
@@ -349,16 +358,293 @@ export class IleGenerationService {
         message: pe.message,
         elapsedMs: Date.now() - t0,
       });
-      this.sse.emit(res, 'error', {
+      sse.emit( 'error', {
         message: pe.message || 'Generation failed',
         kind: pe.kind,
         upstreamStatus: pe.upstreamStatus,
       });
     } finally {
       req.off('close', onClose);
-      this.sse.cleanup(res);
+      sse.close();
     }
     void cancelled; // referenced for completeness in logs above
+  }
+
+  /**
+   * Stream a generation from external context (YouTube URL in v1).
+   *
+   * Flow:
+   *   1. Run the ContextBuilder — provider extracts ONE ContextSource,
+   *      builder wraps it into a GenerationContext (merged content +
+   *      optional summary).
+   *   2. Re-use the SAME streaming LLM pipeline as `generate`, with
+   *      a context-aware system prompt.
+   *   3. Persist the lightweight IleContextRef on the experience doc.
+   *
+   * Generation code here NEVER branches on `source.type` or any
+   * YouTube-specific field — it consumes the merged context the
+   * builder produced. That's the load-bearing invariant.
+   */
+  async generateFromContext(
+    ownerId: string,
+    req: Parameters<IleSseService['attach']>[0],
+    res: Response,
+    args: {
+      courseId: string;
+      courseVersionId: string;
+      itemId?: string;
+      prompt: string;
+      source: string;       // ContextSourceType string
+      input: string;        // URL / file id / raw text
+      hint?: string;
+      requestId?: string;
+    },
+  ): Promise<void> {
+    const requestId = args.requestId ?? cryptoRandomId();
+    const sse = this.sse.attach(req, res);
+
+    // Cancellation wiring mirrors generate().
+    const abort = new AbortController();
+    let cancellationReason: CancellationReason | null = null;
+    const onClose = () => {
+      cancellationReason = 'client_disconnect';
+      abort.abort();
+    };
+    req.once('close', onClose);
+    abort.signal.addEventListener('abort', () => {
+      req.off('close', onClose);
+    });
+
+    const t0 = Date.now();
+    let tokenCount = 0;
+    let responseBytes = 0;
+    let cancelled = false;
+
+    let context: GenerationContext | null = null;
+    try {
+      // ── Phase 1: build context ────────────────────────────────────
+      // The ContextBuilder emits the user-facing phases itself; we just
+      // forward them onto the SSE progress channel so the UI ticks.
+      const onPhase = (phase: ContextPhase) => {
+        sse.emit('progress', { message: phase.label });
+      };
+      context = await this.contextBuilder.build(
+        {
+          source: args.source as Parameters<typeof this.contextBuilder.build>[0]['source'],
+          primary: args.input,
+          hint: args.hint,
+          ownerId,
+        },
+        abort.signal,
+        onPhase,
+      );
+
+      if (abort.signal.aborted) {
+        cancelled = true;
+        ileLog('info', 'stream.cancelled', {
+          requestId,
+          ownerId,
+          reason: cancellationReason ?? 'client_abort',
+          kind: 'context',
+          elapsedMs: Date.now() - t0,
+        });
+        sse.emit('error', {
+          message: 'Generation cancelled.',
+          kind: 'cancelled',
+          reason: cancellationReason ?? 'client_abort',
+        });
+        return;
+      }
+
+      // ── Phase 2: persist draft + context ref ──────────────────────
+      const draft = new IleExperience({
+        ownerId,
+        courseId: args.courseId,
+        courseVersionId: args.courseVersionId,
+        itemId: args.itemId,
+        title: this.deriveTitle(args.prompt),
+        prompt: args.prompt,
+        history: [{ role: 'user', content: args.prompt }],
+        html: '',
+        status: 'draft',
+      });
+      const saved = await this.repo.insert(draft);
+
+      // Persist the lightweight context ref (NEVER raw transcript).
+      // v1 only stores the first source's provenance.
+      const primarySource = context.sources[0];
+      if (primarySource) {
+        await this.repo.setContext(String(saved._id), {
+          source: primarySource.type,
+          sourceUrl: primarySource.id,
+          title: primarySource.title,
+          provider: String(primarySource.metadata.winningStrategy ?? primarySource.type),
+          transcriptHash:
+            typeof primarySource.metadata.transcriptHash === 'string'
+              ? primarySource.metadata.transcriptHash
+              : '',
+          createdAt: primarySource.createdAt,
+        });
+      }
+
+      // ── Phase 3: stream the LLM response ───────────────────────────
+      const { client, config } = await this.makeClientForOwner(ownerId);
+      ileLog('info', 'stream.start', {
+        requestId,
+        ownerId,
+        provider: config.provider,
+        model: config.model,
+        kind: 'generate-from-context',
+        source: primarySource?.type ?? args.source,
+      });
+
+      sse.emit('start', { experienceId: String(saved._id) });
+
+      let nextStep = 0;
+      const fireNextStep = () => {
+        if (nextStep < PROGRESS_STEPS.length) {
+          sse.emit('progress', { message: PROGRESS_STEPS[nextStep] });
+          nextStep++;
+        }
+      };
+      fireNextStep();
+
+      const stream = client.stream({
+        system: await this.buildSystemPrompt(ownerId, context),
+        messages: [{ role: 'user', content: args.prompt }],
+        temperature: 0.4,
+        maxTokens: 32768,
+        signal: abort.signal,
+      });
+
+      let html = '';
+      let chunkCount = 0;
+      let truncated = false;
+
+      for await (const chunk of stream) {
+        if (abort.signal.aborted) break;
+        if (chunk.kind === 'text') {
+          html += chunk.delta;
+          chunkCount++;
+          tokenCount += approximateTokens(chunk.delta);
+          responseBytes += Buffer.byteLength(chunk.delta, 'utf8');
+          sse.emit('html', { delta: chunk.delta });
+          if (chunkCount === 8) fireNextStep();
+          else if (chunkCount === 40) fireNextStep();
+          else if (chunkCount === 120) fireNextStep();
+        } else if (chunk.kind === 'reasoning') {
+          sse.emit('reasoning', {});
+        } else if (chunk.kind === '_stream_meta') {
+          if (chunk.truncated) truncated = true;
+        }
+      }
+
+      if (abort.signal.aborted) {
+        cancelled = true;
+        ileLog('info', 'stream.cancelled', {
+          requestId,
+          ownerId,
+          reason: cancellationReason ?? 'client_abort',
+          kind: 'generate-from-context',
+          partialBytes: responseBytes,
+          elapsedMs: Date.now() - t0,
+        });
+        sse.emit('error', {
+          message: 'Generation cancelled.',
+          kind: 'cancelled',
+          reason: cancellationReason ?? 'client_abort',
+        });
+        return;
+      }
+
+      fireNextStep();
+      const finalHtml = this.normalizeHtml(html);
+
+      await this.repo.appendHistory(String(saved._id), {
+        role: 'assistant',
+        content: 'Generated experience from context',
+        html: finalHtml,
+      });
+      await this.repo.update(String(saved._id), { html: finalHtml });
+
+      sse.emit('done', {
+        experienceId: String(saved._id),
+        html: finalHtml,
+        truncated: truncated || undefined,
+        tokens: tokenCount,
+        bytes: responseBytes,
+        provider: config.provider,
+        model: config.model,
+        elapsedMs: Date.now() - t0,
+        // Surface a hint of what was used as context, so the workspace
+        // chip can render without a second round-trip.
+        contextTitle: primarySource?.title,
+      });
+
+      ileLog('info', 'stream.complete', {
+        requestId,
+        ownerId,
+        provider: config.provider,
+        model: config.model,
+        kind: 'generate-from-context',
+        elapsedMs: Date.now() - t0,
+        tokens: tokenCount,
+        bytes: responseBytes,
+        truncated,
+        sourceType: primarySource?.type ?? args.source,
+      });
+    } catch (err: any) {
+      // Translate provider errors uniformly — same shape as generate().
+      const pe =
+        err instanceof ProviderError ? err : asProviderError(err, 'unknown');
+      if (pe instanceof ProviderCancelledError) {
+        cancelled = true;
+        ileLog('info', 'stream.cancelled', {
+          requestId,
+          ownerId,
+          reason: cancellationReason ?? 'upstream_timeout',
+          kind: 'generate-from-context',
+          partialBytes: responseBytes,
+          elapsedMs: Date.now() - t0,
+        });
+        sse.emit('error', {
+          message: 'Generation cancelled.',
+          kind: 'cancelled',
+          reason: cancellationReason ?? 'client_abort',
+        });
+      } else if (err instanceof ContextProviderError) {
+        // The friendly userMessage on a ContextProviderError is
+        // intentionally the only string the UI is allowed to display.
+        ileLog('warn', 'context.provider_error.surface', {
+          requestId,
+          ownerId,
+          kind: err.kind,
+        });
+        sse.emit('error', {
+          message: err.userMessage,
+          kind: err.kind,
+        });
+      } else {
+        ileLog('error', 'stream.error', {
+          requestId,
+          ownerId,
+          kind: pe.kind,
+          upstreamStatus: pe.upstreamStatus,
+          message: pe.message,
+          elapsedMs: Date.now() - t0,
+        });
+        sse.emit('error', {
+          message: pe.message || 'Generation failed',
+          kind: pe.kind,
+          upstreamStatus: pe.upstreamStatus,
+        });
+      }
+    } finally {
+      req.off('close', onClose);
+      sse.close();
+    }
+    void cancelled; // referenced for completeness in logs above
+    void context;
   }
 
   /**
@@ -368,12 +654,12 @@ export class IleGenerationService {
    */
   async edit(
     ownerId: string,
-    req: Parameters<IleSseService['init']>[0],
+    req: Parameters<IleSseService['attach']>[0],
     res: Response,
     args: { experienceId: string; prompt: string; requestId?: string },
   ): Promise<void> {
     const requestId = args.requestId ?? cryptoRandomId();
-    this.sse.init(req, res);
+    const sse = this.sse.attach(req, res);
 
     // See the cancellation note on `generate` above.
     const abort = new AbortController();
@@ -391,11 +677,11 @@ export class IleGenerationService {
     try {
       const existing = await this.repo.findById(args.experienceId);
       if (!existing) {
-        this.sse.emit(res, 'error', { message: 'Experience not found' });
+        sse.emit( 'error', { message: 'Experience not found' });
         return;
       }
       if (existing.ownerId !== ownerId) {
-        this.sse.emit(res, 'error', { message: 'Not your experience' });
+        sse.emit( 'error', { message: 'Not your experience' });
         return;
       }
 
@@ -405,7 +691,7 @@ export class IleGenerationService {
         content: args.prompt,
       });
 
-      this.sse.emit(res, 'start', { experienceId: args.experienceId });
+      sse.emit( 'start', { experienceId: args.experienceId });
 
       const { client, config } = await this.makeClientForOwner(ownerId);
       ileLog('info', 'stream.start', {
@@ -421,7 +707,7 @@ export class IleGenerationService {
         system: await this.buildSystemPrompt(ownerId),
         messages: [{ role: 'user', content: editUserContent }],
         temperature: 0.4,
-        maxTokens: 8192,
+        maxTokens: 32768,
         signal: abort.signal,
       });
 
@@ -435,15 +721,15 @@ export class IleGenerationService {
           chunkCount++;
           tokenCount += approximateTokens(chunk.delta);
           responseBytes += Buffer.byteLength(chunk.delta, 'utf8');
-          this.sse.emit(res, 'html', { delta: chunk.delta });
+          sse.emit( 'html', { delta: chunk.delta });
           if (chunkCount === 1) {
-            this.sse.emit(res, 'progress', { message: '✓ Reading the current version' });
+            sse.emit( 'progress', { message: '✓ Reading the current version' });
           } else if (chunkCount === 12) {
-            this.sse.emit(res, 'progress', { message: '✓ Applying the change' });
+            sse.emit( 'progress', { message: '✓ Applying the change' });
           } else if (chunkCount === 60) {
-            this.sse.emit(res, 'progress', { message: '✓ Polishing the result' });
+            sse.emit( 'progress', { message: '✓ Polishing the result' });
           } else if (chunkCount === 140) {
-            this.sse.emit(res, 'progress', { message: '✓ Finalizing' });
+            sse.emit( 'progress', { message: '✓ Finalizing' });
           }
         } else if (chunk.kind === '_stream_meta') {
           if (chunk.truncated) truncated = true;
@@ -461,7 +747,7 @@ export class IleGenerationService {
           partialTokens: tokenCount,
           elapsedMs: Date.now() - t0,
         });
-        this.sse.emit(res, 'error', {
+        sse.emit( 'error', {
           message: 'Edit cancelled.',
           kind: 'cancelled',
           reason: cancellationReason ?? 'client_abort',
@@ -477,7 +763,7 @@ export class IleGenerationService {
         html: finalHtml,
       });
 
-      this.sse.emit(res, 'done', {
+      sse.emit( 'done', {
         experienceId: args.experienceId,
         html: finalHtml,
         truncated: truncated || undefined,
@@ -511,7 +797,7 @@ export class IleGenerationService {
           experienceId: args.experienceId,
           elapsedMs: Date.now() - t0,
         });
-        this.sse.emit(res, 'error', {
+        sse.emit( 'error', {
           message: 'Edit cancelled.',
           kind: 'cancelled',
           reason: cancellationReason ?? 'client_abort',
@@ -528,14 +814,14 @@ export class IleGenerationService {
         kindOperation: 'edit',
         experienceId: args.experienceId,
       });
-      this.sse.emit(res, 'error', {
+      sse.emit( 'error', {
         message: pe.message || 'Edit failed',
         kind: pe.kind,
         upstreamStatus: pe.upstreamStatus,
       });
     } finally {
       req.off('close', onClose);
-      this.sse.cleanup(res);
+      sse.close();
     }
   }
 
@@ -548,10 +834,18 @@ export class IleGenerationService {
    * recent uploads and their signed URLs. The model can then reference
    * those URLs directly in the generated HTML.
    *
+   * When `ctx` is provided, a "Available context" block is appended
+   * with the merged content and (optional) summary. Generation code
+   * NEVER branches on the source type — it just renders the merged
+   * content the builder produced.
+   *
    * Errors fetching the asset list are swallowed — a missing asset
    * list shouldn't fail generation, just produce HTML without references.
    */
-  private async buildSystemPrompt(ownerId: string): Promise<string> {
+  private async buildSystemPrompt(
+    ownerId: string,
+    ctx?: GenerationContext,
+  ): Promise<string> {
     let prompt = SYSTEM_PROMPT;
     try {
       const assetFragment = await this.assets.buildAssetContextFragment(ownerId);
@@ -560,6 +854,13 @@ export class IleGenerationService {
       }
     } catch (err) {
       ileLog('warn', 'asset.context.failed', { ownerId, error: (err as Error).message });
+    }
+    if (ctx && (ctx.mergedContent || ctx.summary)) {
+      const summaryBlock = ctx.summary
+        ? `\nSummary:\n${ctx.summary.shortSummary}\n\nKey concepts:\n${ctx.summary.keyConcepts.map((c) => `- ${c}`).join('\n')}`
+        : '';
+      const contextBlock = `Available context:\n${ctx.mergedContent}${summaryBlock}\n\nUse this material to ground the interactive experience. The teacher's follow-up instructions take priority — context is reference material, not a script.`;
+      prompt = `${prompt}\n\n${contextBlock}`;
     }
     return prompt;
   }
@@ -603,15 +904,26 @@ export class IleGenerationService {
   }
 
   /**
-   * Strip accidental markdown fences if the model emits them anyway.
-   * Otherwise leave the HTML untouched — the model is told to emit a full
-   * <!DOCTYPE html> document.
+   * Strip accidental markdown fences AND leading `<think>...</think>`
+   * reasoning blocks if the model emits them. Otherwise leave the HTML
+   * untouched — the model is told to emit a full <!DOCTYPE html> document.
    */
   private normalizeHtml(raw: string): string {
     let html = raw.trim();
     // Strip ```html ... ``` fences (defensive)
     const fence = html.match(/^```(?:html)?\s*([\s\S]*?)\s*```$/i);
     if (fence) html = fence[1];
+    // Strip leading <think>...</think> reasoning blocks (defensive — the
+    // custom provider emits them inline in delta.content instead of a
+    // separate reasoning channel, so they end up in the stored HTML).
+    html = html.replace(/^<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
+    // Strip any stray trailing <think> that wasn't closed (model got cut
+    // off mid-reasoning). Anything past the last </html> past that point
+    // is junk.
+    const lastHtmlClose = html.toLowerCase().lastIndexOf('</html>');
+    if (lastHtmlClose !== -1) {
+      html = html.slice(0, lastHtmlClose + '</html>'.length);
+    }
     return html.trim();
   }
 }
