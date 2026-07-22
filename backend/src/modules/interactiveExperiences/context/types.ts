@@ -2,10 +2,13 @@
  * Context Provider architecture — types and the load-bearing contract.
  *
  * A ContextProvider takes raw teacher input (a YouTube URL, a PDF blob,
- * an audio file, a course item id, …) and produces a normalized
- * `GenerationContext` that the LLM prompt can consume. The ILE
- * generation pipeline doesn't care what the source is — it just reads
- * the context and injects it into the system prompt.
+ * an audio file, a course item id, …) and produces ONE `ContextSource`.
+ * The ContextBuilder composes one or more ContextSources into a
+ * `GenerationContext` for the LLM prompt.
+ *
+ * The ILE generation pipeline doesn't care what the sources are — it
+ * just reads the merged content and summary and injects them into the
+ * system prompt.
  *
  * Future providers (PDF, Course Item, Audio, OCR, Website, …) plug
  * in by implementing the `ContextProvider` interface and registering
@@ -30,10 +33,14 @@
  *
  * 4. `canHandle` MUST be cheap (no HTTP calls). It runs on every input
  *    the system sees.
+ *
+ * 5. A provider returns exactly ONE ContextSource. Composing multiple
+ *    sources (current lesson + YouTube, multiple videos, …) is the
+ *    ContextBuilder's job, not the provider's.
  */
 
-/** Source identifiers — useful for analytics + the "Context: …" chip. */
-export type ContextSourceId =
+/** Source type identifiers — used for routing + UI grouping. */
+export type ContextSourceType =
   | 'youtube'
   | 'pdf'
   | 'markdown'
@@ -55,7 +62,7 @@ export interface ContextInput {
    * Source identifier. Lets the menu pre-route ("YouTube" → YouTube
    * provider) without relying solely on URL sniffing.
    */
-  source: ContextSourceId;
+  source: ContextSourceType;
   /**
    * Owner id (the teacher). The summarizer uses this to look up the
    * owner's AI config. Optional — when omitted, summarization uses
@@ -65,28 +72,34 @@ export interface ContextInput {
 }
 
 /**
- * Structured educational content. The `text` field is always present
- * and is the primary input to the LLM prompt. Other fields are
- * provider-specific.
+ * A single extracted source. Provider-agnostic — every provider returns
+ * one of these. The `metadata` bag holds provider-specific fields
+ * (videoId, duration, pageCount, language, transcriptHash, …).
+ *
+ * `content` is the long-form text the LLM prompt consumes. The builder
+ * may cap it.
  */
-export interface ContextBody {
+export interface ContextSource {
+  /** Stable id (e.g. youtube videoId, file id). For deduplication. */
+  id: string;
+  /** Source type identifier. */
+  type: ContextSourceType;
+  /** Display title — used in the "Context: …" chip. */
+  title: string;
   /** Long-form text. Always present. Capped at a generous size. */
-  text: string;
-  /** Optional chapters/sections for prompt grounding. */
-  chapters?: Array<{ title: string; startSec?: number; text: string }>;
-  /** Optional concepts the provider already extracted. */
-  concepts?: string[];
-  /** Source-specific metadata (duration, author, language, page count). */
-  meta: Record<string, unknown>;
-}
-
-/** Pre-summarized key concepts. Filled by `TranscriptCleaner`. */
-export interface ContextSummary {
-  shortSummary: string;
-  keyConcepts: string[];
-  learningObjectives?: string[];
-  misconceptions?: string[];
-  interactiveOpportunities?: string[];
+  content: string;
+  /**
+   * Provider-specific metadata (duration, author, language, page count,
+   * transcriptHash for cache-key future, …).
+   */
+  metadata: Record<string, unknown>;
+  /**
+   * Append-only record of which strategies / fallbacks the provider
+   * used. Useful for analytics + debugging.
+   */
+  provenance: ContextProvenanceEntry[];
+  /** When the source was extracted. */
+  createdAt: Date;
 }
 
 /**
@@ -102,31 +115,46 @@ export interface ContextProvenanceEntry {
 }
 
 /**
- * Normalized context that goes into the LLM prompt. Same shape
- * regardless of source (YouTube, PDF, audio, …).
+ * Pre-summarized key concepts. Filled by the builder's summarizer.
+ */
+export interface ContextSummary {
+  shortSummary: string;
+  keyConcepts: string[];
+  learningObjectives?: string[];
+  misconceptions?: string[];
+  interactiveOpportunities?: string[];
+}
+
+/**
+ * The composed context the LLM prompt consumes. Built by
+ * ContextBuilder from one or more ContextSources.
+ *
+ * `mergedContent` is the joined text the prompt actually quotes.
+ * `sources[]` preserves the per-source structure for chips, audit
+ * trails, and selective re-generation.
  */
 export interface GenerationContext {
-  source: ContextSourceId;
-  /** Display title — used in the workspace "Context: …" chip. */
-  title: string;
-  /** Original input as the teacher provided it (URL, file id, …). */
-  originalInput: string;
-  body: ContextBody;
-  /** Pre-summarized content. Optional — providers can pre-summarize. */
+  /** All sources that contributed to this context. */
+  sources: ContextSource[];
+  /** Joined long-form text. Always present. Builder-capped. */
+  mergedContent: string;
+  /** Optional pre-summary. Builder-produced when sources warrant. */
   summary?: ContextSummary;
-  /** Append-only record of which strategies were attempted. */
-  provenance: ContextProvenanceEntry[];
 }
 
 /**
  * Phase reporting hook. Providers and the builder call this with
  * user-facing progress messages. The SSE layer maps them onto the
- * `progress` event channel.
+ * existing `progress` event channel.
  */
 export interface ContextPhase {
   /** Stable id for the phase (useful for tests/dedup). */
   id: string;
-  /** Teacher-facing label — no implementation details exposed. */
+  /**
+   * Teacher-facing label — NO implementation details. Allowed values
+   * come from CONTEXT_PHASES below; custom strings must NOT mention
+   * yt-dlp, Whisper, Python, captions, audio, stack traces, etc.
+   */
   label: string;
 }
 
@@ -144,15 +172,15 @@ export interface ContextProvider {
   canHandle(input: ContextInput): boolean;
 
   /**
-   * Produce the context. Implementations handle their own fallback
-   * chains internally. Must never throw raw errors — providers are
-   * responsible for translating everything into a `ContextProviderError`.
+   * Extract ONE ContextSource. Implementations handle their own
+   * fallback chains internally. Must never throw raw errors — providers
+   * are responsible for translating everything into a `ContextProviderError`.
    */
-  buildContext(
+  extract(
     input: ContextInput,
     signal: AbortSignal,
     onPhase: (phase: ContextPhase) => void,
-  ): Promise<GenerationContext>;
+  ): Promise<ContextSource>;
 }
 
 /**
@@ -188,18 +216,18 @@ export class ContextProviderError extends Error {
 }
 
 /**
- * Phase ids used across providers. Centralised so the SSE progress
- * log can dedup identical phases cleanly.
+ * Teacher-facing phase labels. Centralised so the SSE progress log
+ * can dedup identical phases cleanly and so all providers use the
+ * same user-facing vocabulary.
+ *
+ * RULE: NO implementation details. No mentions of yt-dlp, Whisper,
+ * Python, captions, audio, stack traces, subprocess, etc.
  */
 export const CONTEXT_PHASES = {
-  PICKING_SOURCE: { id: 'picking-source', label: 'Preparing video context...' },
-  FETCHING_META: { id: 'fetching-meta', label: 'Preparing video context...' },
-  READING_CAPTIONS: { id: 'reading-captions', label: 'Analyzing educational content...' },
-  NO_CAPTIONS_FALLBACK: {
-    id: 'no-captions-fallback',
-    label: 'Analyzing educational content...',
+  PREPARING_CONTEXT: { id: 'preparing-context', label: 'Preparing context...' },
+  UNDERSTANDING_MATERIAL: {
+    id: 'understanding-material',
+    label: 'Understanding the learning material...',
   },
-  TRANSCRIBING: { id: 'transcribing', label: 'Analyzing educational content...' },
-  CLEANING_TRANSCRIPT: { id: 'cleaning-transcript', label: 'Analyzing educational content...' },
-  SUMMARIZING: { id: 'summarizing', label: 'Analyzing educational content...' },
+  SUMMARIZING: { id: 'summarizing', label: 'Understanding the learning material...' },
 } as const;

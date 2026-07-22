@@ -2,11 +2,12 @@ import { injectable, inject } from 'inversify';
 import { ILE_TYPES } from '../../types.js';
 import { TranscriptCleaner } from '../TranscriptCleaner.js';
 import {
+  CONTEXT_PHASES,
   ContextInput,
   ContextPhase,
   ContextProvider,
   ContextProviderError,
-  GenerationContext,
+  ContextSource,
 } from '../types.js';
 import { TranscriptStrategy } from './strategies/Strategy.js';
 import { CreatorCaptionsStrategy } from './strategies/CreatorCaptionsStrategy.js';
@@ -24,18 +25,18 @@ import { ileLog } from '../../services/observability.js';
  *   2. Auto-generated captions   (Strategy 2 — youtube-transcript)
  *   3. Local Whisper             (Strategy 3 — yt-dlp + faster-whisper)
  *
- * The builder does not know about these strategies. It just calls
- * `buildContext` and gets back a normalized `GenerationContext`.
+ * Returns ONE `ContextSource`. The builder wraps it into a
+ * `GenerationContext` — generation code never sees YouTube specifics.
  *
  * INVARIANTS
  * ----------
  * - Every error is translated to `ContextProviderError` with a
  *   friendly `userMessage`. No raw library exceptions escape.
- * - Every strategy attempt is recorded in `provenance[]`. The
- *   analytics layer can later answer "what fraction of YouTube
- *   contexts fall through to Whisper?" without extra logging.
+ * - Every strategy attempt is recorded in the source's `provenance[]`.
  * - `canHandle` is cheap (URL regex). No network calls.
  * - Honours `AbortSignal`; throws `cancelled` on abort.
+ * - Strategies know NOTHING about each other. The provider owns the
+ *   fallback chain.
  */
 @injectable()
 export class YouTubeContextProvider implements ContextProvider {
@@ -55,17 +56,16 @@ export class YouTubeContextProvider implements ContextProvider {
 
   canHandle(input: ContextInput): boolean {
     if (input.source === 'youtube') return true;
-    // Reject obvious non-YouTube URLs early — saving a network roundtrip.
     const primary = (input.primary || '').trim();
     if (!primary) return false;
     return /youtu\.?be/.test(primary) || /^[A-Za-z0-9_-]{11}$/.test(primary);
   }
 
-  async buildContext(
+  async extract(
     input: ContextInput,
     signal: AbortSignal,
     onPhase: (phase: ContextPhase) => void,
-  ): Promise<GenerationContext> {
+  ): Promise<ContextSource> {
     const videoId = requireYouTubeId(input.primary);
 
     if (signal.aborted) {
@@ -76,7 +76,7 @@ export class YouTubeContextProvider implements ContextProvider {
       );
     }
 
-    onPhase({ id: 'fetching-meta', label: 'Preparing video context...' });
+    onPhase(CONTEXT_PHASES.PREPARING_CONTEXT);
     const meta = await fetchVideoMeta(videoId, signal);
 
     if (signal.aborted) {
@@ -87,7 +87,7 @@ export class YouTubeContextProvider implements ContextProvider {
       );
     }
 
-    const provenance: GenerationContext['provenance'] = [];
+    const provenance: ContextSource['provenance'] = [];
     let lastUnsupported: ContextProviderError | null = null;
     let lastTransient: ContextProviderError | null = null;
 
@@ -100,21 +100,16 @@ export class YouTubeContextProvider implements ContextProvider {
         );
       }
 
-      // Surface the right user-facing label per strategy without
-      // revealing implementation details.
-      if (strategy.name === 'creator-captions' || strategy.name === 'auto-captions') {
-        onPhase({ id: 'reading-captions', label: 'Analyzing educational content...' });
-      } else if (strategy.name === 'whisper') {
-        onPhase({ id: 'transcribing', label: 'Analyzing educational content...' });
-      }
+      // Same user-facing label for every strategy. We never reveal
+      // which one is running — that's an implementation detail.
+      onPhase(CONTEXT_PHASES.UNDERSTANDING_MATERIAL);
 
       const t0 = Date.now();
       try {
         const result = await strategy.extract(videoId, signal, onPhase);
 
-        // Cleaner: dedupe, strip noise, join prose.
         const cleaned = this.cleaner.clean(result.lines);
-        const hash = this.cleaner.hash(cleaned);
+        const transcriptHash = this.cleaner.hash(cleaned);
 
         provenance.push({
           strategy: strategy.name,
@@ -123,58 +118,43 @@ export class YouTubeContextProvider implements ContextProvider {
           note: result.language,
         });
 
-        // Provider pre-summarizes when it can — gives the LLM prompt
-        // a high-quality header without an extra round-trip.
-        onPhase({ id: 'summarizing', label: 'Analyzing educational content...' });
-        let summary;
-        try {
-          summary = await this.cleaner.summarize(cleaned.text, signal, {
-            ownerId: input.ownerId,
+        onPhase(CONTEXT_PHASES.UNDERSTANDING_MATERIAL);
+
+        const content = cleaned.text;
+        if (!content) {
+          // Strategy claimed success but produced nothing usable.
+          // Treat as unavailable and continue down the chain.
+          provenance.push({
+            strategy: strategy.name,
+            outcome: 'unavailable',
+            durationMs: Date.now() - t0,
+            note: 'empty content after cleaning',
           });
-        } catch (err) {
-          if ((err as Error).name === 'AbortError' || signal.aborted) {
-            throw new ContextProviderError(
-              'Cancelled during summarization',
-              'Generation cancelled.',
-              'cancelled',
-              err,
-            );
-          }
-          // Cleaner already degrades internally. If it still threw,
-          // log and continue without a summary.
-          ileLog('warn', 'context.summary.failed', {
-            error: (err as Error).message,
-          });
+          continue;
         }
 
-        const body = {
-          text: cleaned.text,
-          lines: cleaned.lines,
-          chapters: cleaned.lines.length
-            ? cleaned.lines.slice(0, 30).map((ln, i) => ({
-                title: `Segment ${i + 1}`,
-                startSec: ln.startSec,
-                text: ln.text,
-              }))
-            : undefined,
-          meta: {
+        const source: ContextSource = {
+          id: videoId,
+          type: 'youtube',
+          title: meta.title || `YouTube video ${videoId}`,
+          content,
+          metadata: {
             videoId,
             durationSec: meta.durationSec,
             author: meta.author,
             thumbnailUrl: meta.thumbnailUrl,
             language: result.language,
-            transcriptHash: hash,
+            transcriptHash,
+            // Compact provenance for analytics without bloating the
+            // document. The full per-strategy record lives in
+            // `provenance` above; this is the at-a-glance summary.
+            winningStrategy: strategy.name,
           },
+          provenance,
+          createdAt: new Date(),
         };
 
-        return {
-          source: 'youtube',
-          title: meta.title || `YouTube video ${videoId}`,
-          originalInput: input.primary,
-          body,
-          summary,
-          provenance,
-        };
+        return source;
       } catch (err) {
         if (signal.aborted) {
           throw new ContextProviderError(
@@ -184,7 +164,6 @@ export class YouTubeContextProvider implements ContextProvider {
           );
         }
         if (!(err instanceof ContextProviderError)) {
-          // Defensive: strategy should have wrapped this already.
           ileLog('error', 'context.strategy.unexpected_error', {
             strategy: strategy.name,
             error: (err as Error).message,
@@ -194,8 +173,6 @@ export class YouTubeContextProvider implements ContextProvider {
 
         const durationMs = Date.now() - t0;
 
-        // 'unsupported' (private / region / age-restricted) is a
-        // hard stop — no point trying other strategies.
         if (err.kind === 'unsupported') {
           provenance.push({
             strategy: strategy.name,
@@ -249,9 +226,9 @@ export class YouTubeContextProvider implements ContextProvider {
       throw lastTransient;
     }
 
-    // Every strategy returned `unavailable` / similar — give the
-    // teacher a friendly message. If the Whisper strategy recorded a
-    // not_configured note, mention the install hint.
+    // Every strategy returned `unavailable` — give the teacher a
+    // friendly message. If the Whisper strategy recorded a
+    // not_configured note, surface the install hint.
     const whisperNote = provenance.find(
       (p) => p.strategy === 'whisper' && (p.note ?? '').includes('not_configured'),
     );

@@ -3,33 +3,53 @@ import { ILE_TYPES } from '../types.js';
 import { ContextProviderRegistry } from './ContextProviderRegistry.js';
 import { TranscriptCleaner } from './TranscriptCleaner.js';
 import {
+  CONTEXT_PHASES,
   ContextInput,
   ContextPhase,
   ContextProviderError,
+  ContextSource,
   GenerationContext,
 } from './types.js';
 import { ileLog } from '../services/observability.js';
 
 /**
- * Below this character count the transcript is short enough that the
- * LLM doesn't need a separate summary call — we just pass the cleaned
- * text directly. Above this, we run the LLM-backed summarizer to
- * extract key concepts + a short summary the system prompt can quote.
+ * Hard cap on the joined `mergedContent`. The LLM prompt quotes up to
+ * this many characters of context; over it, we trim with a marker.
+ * Generous (≈3,000 tokens) so most contexts fit; bounded for cost.
  */
-const SUMMARIZE_PROVIDER_THRESHOLD_CHARS = 1_500;
+const MERGED_CONTENT_CAP_CHARS = 12_000;
 
 /**
- * Thin orchestrator: pick the right provider, run it, and (optionally)
- * summarize the result.
+ * Per-source content cap applied before merging. Prevents a single
+ * source from blowing the budget.
+ */
+const PER_SOURCE_CONTENT_CAP_CHARS = 50_000;
+
+/**
+ * Below this character count the merged content is short enough that
+ * the LLM doesn't need a separate summary call — we pass the text
+ * directly.
+ */
+const SUMMARIZE_THRESHOLD_CHARS = 1_500;
+
+/**
+ * Thin orchestrator. Responsibilities ONLY:
  *
- * The provider owns its own internal fallback chain (so the YouTube
- * provider tries creator captions → auto captions → Whisper). The
- * builder does NOT know about strategies — that's the provider's job.
+ *   1. Locate the right provider for the input (registry lookup).
+ *   2. Invoke the provider — get back one ContextSource.
+ *   3. Normalize / cap content.
+ *   4. Optionally summarize (LLM or extractive fallback).
+ *   5. Compose a GenerationContext wrapping the source(s).
  *
- * This keeps the builder stable as new providers are added. A future
- * "PDF" provider might have a completely different fallback strategy
- * ("primary parse → OCR → manual upload") without touching the
- * builder.
+ * Anything beyond that (provider-specific logic, branching on source
+ * type, custom merge strategies, persistence, …) belongs elsewhere.
+ * If this file grows, the abstraction is wrong.
+ *
+ * NOTE on multi-source: v1 only calls ONE provider per request, so
+ * the resulting `GenerationContext.sources` has length 1. The shape
+ * is already multi-source-capable — future flows that need to
+ * combine "current lesson + YouTube" or "PDF + multiple videos"
+ * compose multiple providers here.
  */
 @injectable()
 export class ContextBuilder {
@@ -41,19 +61,20 @@ export class ContextBuilder {
   ) {}
 
   /**
-   * Build the normalized context for an input. Emits progress via
-   * `onPhase` so the SSE layer can forward it to the teacher.
+   * Build the composed context for one input.
+   *
+   * Emits progress via `onPhase`. The SSE layer forwards each call to
+   * the existing `progress` event channel — no parallel protocol.
    *
    * Errors: only `ContextProviderError` ever escapes. Raw library
-   * exceptions (yt-dlp stderr, network failures, parse errors) are
-   * already translated by the provider layer.
+   * exceptions are already translated by the provider layer.
    */
   async build(
     input: ContextInput,
     signal: AbortSignal,
     onPhase: (phase: ContextPhase) => void,
   ): Promise<GenerationContext> {
-    onPhase({ id: 'picking-source', label: 'Preparing video context...' });
+    onPhase(CONTEXT_PHASES.PREPARING_CONTEXT);
 
     const provider = this.registry.findProvider(input);
     if (!provider) {
@@ -68,9 +89,9 @@ export class ContextBuilder {
       );
     }
 
-    let ctx: GenerationContext;
+    let source: ContextSource;
     try {
-      ctx = await provider.buildContext(input, signal, onPhase);
+      source = await provider.extract(input, signal, onPhase);
     } catch (err) {
       if (err instanceof ContextProviderError) {
         ileLog('warn', 'context.provider_error', {
@@ -80,7 +101,6 @@ export class ContextBuilder {
         });
         throw err;
       }
-      // Defensive: provider should have wrapped this already.
       ileLog('error', 'context.unexpected_error', {
         source: input.source,
         error: (err as Error).message,
@@ -93,20 +113,26 @@ export class ContextBuilder {
       );
     }
 
-    // Provider may have already pre-summarized (some providers know
-    // their content well enough). If not, and the text is long enough
-    // to justify the cost, run the cleaner's LLM summarizer.
-    if (
-      !ctx.summary &&
-      ctx.body.text.length >= SUMMARIZE_PROVIDER_THRESHOLD_CHARS
-    ) {
-      onPhase({ id: 'summarizing', label: 'Analyzing educational content...' });
+    // Normalize content length on the source. Providers shouldn't
+    // expose arbitrarily large bodies; this is the safety net.
+    source.content = capText(source.content, PER_SOURCE_CONTENT_CAP_CHARS);
+
+    const mergedContent = capText(source.content, MERGED_CONTENT_CAP_CHARS);
+    const ctx: GenerationContext = {
+      sources: [source],
+      mergedContent,
+    };
+
+    // Optionally summarize. The LLM-backed summarizer lives in
+    // TranscriptCleaner; it gracefully degrades to extractive when
+    // the owner has no AI config. Errors here are non-fatal — we
+    // keep the merged content even if summarization fails.
+    if (mergedContent.length >= SUMMARIZE_THRESHOLD_CHARS) {
+      onPhase(CONTEXT_PHASES.SUMMARIZING);
       try {
-        ctx.summary = await this.cleaner.summarize(
-          ctx.body.text,
-          signal,
-          input.ownerId ? { ownerId: input.ownerId } : {},
-        );
+        ctx.summary = await this.cleaner.summarize(mergedContent, signal, {
+          ownerId: input.ownerId,
+        });
       } catch (err) {
         if ((err as Error).name === 'AbortError' || signal.aborted) {
           throw new ContextProviderError(
@@ -116,9 +142,6 @@ export class ContextBuilder {
             err,
           );
         }
-        // Cleaner already degrades to extractive on LLM failure; if we
-        // still got an error here it's structural — log and continue
-        // without a summary rather than fail the whole build.
         ileLog('warn', 'context.summary.failed', {
           error: (err as Error).message,
         });
@@ -127,4 +150,14 @@ export class ContextBuilder {
 
     return ctx;
   }
+}
+
+/**
+ * Trim text to `cap` characters with a marker so the model knows the
+ * document was longer than what it sees.
+ */
+function capText(text: string, cap: number): string {
+  if (!text) return '';
+  if (text.length <= cap) return text;
+  return text.slice(0, cap) + ' …[context trimmed]…';
 }

@@ -73,46 +73,65 @@ function readWhisperComputeType(): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Binary detection
+// Binary detection — CACHED for the process lifetime
 // ─────────────────────────────────────────────────────────────────────
+//
+// Per locked-in decision: we do NOT probe binaries on every request.
+// The result is cached forever in this module's scope; the only way
+// to re-probe is to restart the backend. If the user installs a
+// missing dep mid-session they need a backend restart to pick it
+// up. That's an acceptable tradeoff — the alternative (periodic
+// re-probe) wastes a fork+exec per request.
+//
+// If a probe ever reports "missing", we never re-probe. The teacher
+// gets the friendly install hint and can move on.
 
 const binaryCache = new Map<string, string | null>();
 
 async function which(bin: string): Promise<string | null> {
-  if (binaryCache.has(bin)) return binaryCache.get(bin) ?? null;
+  const cached = binaryCache.get(bin);
+  if (cached !== undefined) return cached;
   const cmd = process.platform === 'win32' ? 'where' : 'which';
-  return new Promise<string | null>((resolve) => {
+  const found = await new Promise<string | null>((resolve) => {
     const child = spawn(cmd, [bin], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
     child.stdout.on('data', (chunk: Buffer) => {
       out += chunk.toString('utf8');
     });
-    child.on('error', () => {
-      binaryCache.set(bin, null);
-      resolve(null);
-    });
+    child.on('error', () => resolve(null));
     child.on('close', (code) => {
-      const found = code === 0 ? out.split('\n')[0]?.trim() : '';
-      const resolved = found || null;
-      binaryCache.set(bin, resolved);
-      resolve(resolved);
+      const first = code === 0 ? out.split('\n')[0]?.trim() : '';
+      resolve(first || null);
     });
   });
+  binaryCache.set(bin, found);
+  return found;
 }
 
-let fasterWhisperProbe: Promise<boolean> | null = null;
+// `null` = "probed and not installed" — sticky until restart.
+// `true` = "probed and installed".
+let fasterWhisperProbe: boolean | null = null;
+let fasterWhisperProbePromise: Promise<boolean> | null = null;
 
 async function isFasterWhisperInstalled(): Promise<boolean> {
-  if (fasterWhisperProbe) return fasterWhisperProbe;
-  fasterWhisperProbe = new Promise<boolean>((resolve) => {
+  if (fasterWhisperProbe !== null) return fasterWhisperProbe;
+  if (fasterWhisperProbePromise) return fasterWhisperProbePromise;
+
+  fasterWhisperProbePromise = new Promise<boolean>((resolve) => {
     const bin = readWhisperBin();
     const child = spawn(bin, ['-c', 'import faster_whisper'], {
       stdio: ['ignore', 'ignore', 'ignore'],
     });
-    child.on('error', () => resolve(false));
-    child.on('close', (code) => resolve(code === 0));
+    child.on('error', () => {
+      fasterWhisperProbe = false;
+      resolve(false);
+    });
+    child.on('close', (code) => {
+      fasterWhisperProbe = code === 0;
+      resolve(code === 0);
+    });
   });
-  return fasterWhisperProbe;
+  return fasterWhisperProbePromise;
 }
 
 // ─────────────────────────────────────────────────────────────────────
