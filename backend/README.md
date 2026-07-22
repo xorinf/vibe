@@ -179,4 +179,135 @@ backend/
 
 ---
 
+## Context Providers (YouTube in v1)
+
+The Interactive Learning Experiences (ILE) module accepts educational
+content from external sources. v1 ships with **YouTube** as the first
+implementation of the generic `ContextProvider` interface. The
+provider chains three strategies transparently:
+
+1. **Creator-uploaded captions** — `youtube-transcript` (no API key).
+2. **Auto-generated captions** — same library, multi-language loop.
+3. **Local Whisper** — `yt-dlp` + `faster-whisper` Python child process.
+
+The teacher never sees which strategy succeeded. The UI surface is
+always `Preparing context...` → `Understanding the learning material...`
+→ `Generating interactive experience...`. Raw transcripts are never
+persisted — only lightweight provenance (`source`, `sourceUrl`,
+`title`, `provider`, `transcriptHash`, `createdAt`).
+
+### Optional: install Whisper fallback
+
+The first two strategies need nothing beyond the runtime npm dep
+`youtube-transcript` (installed automatically). The third strategy
+(Whisper) is **optional** and only activates when both `yt-dlp` and
+`faster-whisper` are on `PATH`. Without them, the provider
+transparently falls back to captions-only and surfaces a friendly
+install hint to the teacher.
+
+**Supported platforms:** macOS, Linux. Windows works if you have
+`where` + a Python install; audio-extraction paths may differ.
+
+#### macOS
+
+```bash
+brew install yt-dlp ffmpeg           # ffmpeg is required by yt-dlp
+python3 -m pip install --user faster-whisper
+```
+
+`yt-dlp` lives at `/opt/homebrew/bin/yt-dlp` on Apple Silicon and
+`/usr/local/bin/yt-dlp` on Intel Macs. `python3` is the default on
+macOS. The strategy resolves `yt-dlp` via `which` and runs
+`python3 -c "import faster_whisper"` as the probe — no env config
+needed on macOS.
+
+#### Linux
+
+```bash
+# Debian / Ubuntu
+sudo apt update
+sudo apt install -y ffmpeg python3-pip
+sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+sudo chmod a+rx /usr/local/bin/yt-dlp
+python3 -m pip install --user faster-whisper
+```
+
+#### Windows
+
+```powershell
+winget install yt-dlp.yt-dlp
+winget install Gyan.FFmpeg
+py -m pip install --user faster-whisper
+```
+
+The strategy uses `where` on Windows (vs `which` on POSIX). Override
+the binary path with `ILE_WHISPER_BIN=python` if needed.
+
+### Environment variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ILE_WHISPER_MODEL` | `small` | One of `tiny`, `base`, `small`, `medium`, `large-v3`. `small` is the quality/speed tradeoff. |
+| `ILE_WHISPER_TIMEOUT_MS` | `600000` | Hard cap on transcription time (10 min). |
+| `ILE_WHISPER_BIN` | `python3` | Python interpreter. Use `python` on Windows. |
+| `ILE_WHISPER_DEVICE` | `cpu` | `cuda` for GPU acceleration. |
+| `ILE_WHISPER_COMPUTE_TYPE` | `int8` (cpu) / `float16` (cuda) | Whisper compute type. |
+| `ILE_YT_AUTO_LANGS` | `en,en-US,en-GB,es,fr,de` | Comma-separated languages to try for auto captions. |
+
+Binary detection is **cached for the process lifetime**. If you install
+missing deps mid-session, restart the backend to pick them up.
+
+### Behavior matrix
+
+| Video state | Result |
+|---|---|
+| Public video with creator captions | Strategy 1 succeeds. |
+| Public video with auto captions only | Strategy 2 succeeds. |
+| Public video with no captions | Strategy 3 runs (Whisper). |
+| Private video | `ContextProviderError('unsupported')` — friendly message, no fall-through. |
+| Region-blocked video | `ContextProviderError('unsupported')`. |
+| Age-restricted video | `ContextProviderError('unsupported')`. |
+| yt-dlp / faster-whisper missing | Falls back to captions-only with install hint. |
+| Network blip | `ContextProviderError('transient')` — UI offers retry. |
+| Teacher cancels mid-stream | `ContextProviderError('cancelled')`. Whisper child is killed with SIGTERM, then SIGKILL after 5s. |
+
+### Troubleshooting
+
+**`YouTube captions unavailable and local transcription is not configured`**
+Both captions failed AND Whisper isn't installed. Install per the
+platform instructions above and restart the backend.
+
+**`Unable to download audio from this video`** — yt-dlp ran but
+errored. Check `~/.local/share/yt-dlp` or backend logs for stderr.
+Usually a region block or a sign-in requirement; the friendly message
+already says what to do.
+
+**Whisper takes a long time on big videos** — Expected for the
+default `small` model. Drop to `tiny` for 5–10× speedup at modest
+quality cost via `ILE_WHISPER_MODEL=tiny`.
+
+**Whisper outputs nonsense** — Probably language mismatch. Whisper
+auto-detects; you can't force a language in v1. If it's a non-English
+video, `youtube-transcript` auto-captions usually handles it faster.
+
+**`faster-whisper not importable`** — The Python probe failed. Run
+`python3 -c "import faster_whisper"` and fix any pip / venv issues.
+
+### Architecture: adding a new provider
+
+The whole architecture is designed so a future provider (PDF, Course
+Item, Audio, OCR, Website, …) is **one file + one line of
+registration**. Concretely:
+
+1. Implement `ContextProvider` in
+   `src/modules/interactiveExperiences/context/providers/<Name>.ts`.
+2. Bind it in `container.ts` next to `YouTubeContextProvider`.
+3. Register it in `index.ts`'s `setupInteractiveExperiencesContainer`.
+
+No changes to `IleGenerationService`, the controller, or the
+frontend menu's structure — `AddContextMenu.tsx` adds a row when a
+new provider ships.
+
+---
+
 For more details, see the codebase and module documentation.
