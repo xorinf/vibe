@@ -15,18 +15,17 @@ import {
   RotateCcw,
   Check,
   X,
-  Columns2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/utils/utils';
 import {
-  PROMPTLibrary,
   QUICK_ACTIONS,
   resolveInstruction,
   type QuickActionId,
 } from './quickActions';
 import type { ChatMessage, IleEditorApi, IleEditorState } from './useIleEditor';
+import { AddContextMenu } from './AddContextMenu';
 
 export interface ChatPaneProps {
   state: IleEditorState;
@@ -36,6 +35,19 @@ export interface ChatPaneProps {
    * routing between generate/edit, so this is a passthrough.
    */
   onSubmit: (text: string) => void;
+  /**
+   * Fired when the teacher confirms context (YouTube URL in v1) in
+   * the Add Context dialog. The workspace owns the actual stream
+   * because it has the course context — the chat pane just hosts the
+   * menu UI. Pass undefined to hide the Add Context button.
+   */
+  onContextSelected?: (args: {
+    source: 'youtube';
+    input: string;
+    prompt: string;
+  }) => void;
+  /** Disables the Add Context button (e.g. while AI is streaming). */
+  contextDisabled?: boolean;
   /** Hides the composer entirely (used when no AI provider is configured). */
   composerHidden?: boolean;
   /** Show a hint above the composer pointing the teacher to the config panel. */
@@ -46,27 +58,6 @@ export interface ChatPaneProps {
 const FOLLOWUP_PROMPTS: Partial<Record<QuickActionId, { label: string; placeholder: string }>> = {
   translate: { label: 'Target language', placeholder: 'e.g. Spanish, Japanese, French…' },
 };
-
-/** LocalStorage key for the chat history. Scoped per experience so two
- * tabs in the same browser can edit different experiences without
- * clobbering each other. The "fresh" key is used when no experience
- * is bound yet (i.e. freshCanvas). */
-function chatStorageKey(experienceId: string | undefined, freshCanvas: boolean): string {
-  return freshCanvas || !experienceId
-    ? 'ile.chat.fresh'
-    : `ile.chat.${experienceId}`;
-}
-
-/** Persist messages + lastApplied baseline so a page reload restores
- * the exact thread + diff state. Stripped to the minimum shape the
- * hook can hydrate from. We don't keep tokens or latency because
- * they're only relevant to the in-flight stream. */
-interface PersistedChat {
-  v: 1;
-  messages: ChatMessage[];
-  lastAppliedHtml?: string;
-  ts: number;
-}
 
 /**
  * Left pane of the Teacher ILE Workspace. Renders the conversational
@@ -80,6 +71,8 @@ export function ChatPane({
   state,
   api,
   onSubmit,
+  onContextSelected,
+  contextDisabled,
   composerHidden,
   configHint,
   className,
@@ -343,6 +336,12 @@ export function ChatPane({
               · ⌘↩ to send
             </span>
             <div className="flex items-center gap-2">
+              {onContextSelected && (
+                <AddContextMenu
+                  disabled={Boolean(contextDisabled) || isStreaming || activeFollowup !== null}
+                  onContextSelected={onContextSelected}
+                />
+              )}
               {isStreaming ? (
                 <Button
                   size="sm"
@@ -531,7 +530,6 @@ function MessageBubble({
   onAccept,
   onReject,
   onFork,
-  isLastAssistant,
 }: {
   message: ChatMessage;
   onRetry?: () => void;

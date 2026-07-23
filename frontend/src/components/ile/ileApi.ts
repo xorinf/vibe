@@ -29,6 +29,25 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/**
+ * Provenance for context-driven generations (e.g. YouTube). The
+ * teacher workspace renders this as a "Context: …" chip; the
+ * student-facing /:id/play route (StudentIlePayload) intentionally
+ * omits it — source URLs are an authoring concern, not a learner
+ * one (locked-in decision #4).
+ *
+ * Mirrors backend `IleContextRef`. We inline the shape here to
+ * avoid pulling the transformer module into the frontend.
+ */
+export interface IleContextRef {
+  source: string;
+  sourceUrl: string;
+  title: string;
+  provider: string;
+  transcriptHash: string;
+  createdAt: string;
+}
+
 export interface IleExperienceResponse {
   _id: string;
   title: string;
@@ -45,6 +64,9 @@ export interface IleExperienceResponse {
   currentVersion: number;
   archivedAt?: string;
   publishedAt?: string;
+  /** Optional context provenance — populated when the experience was
+   *  generated from external context (YouTube in v1). Teacher-only. */
+  context?: IleContextRef;
   createdAt: string;
   updatedAt: string;
 }

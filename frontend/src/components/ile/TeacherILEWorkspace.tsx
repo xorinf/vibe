@@ -30,6 +30,8 @@ import { ActionsMenu } from './ActionsMenu';
 import { AssetManager } from './AssetManager';
 import { EditorSplitPane } from './EditorSplitPane';
 import { useIleEditor } from './useIleEditor';
+import { AddContextMenu } from './AddContextMenu';
+import { useIleContextGeneration } from './useIleContextGeneration';
 import {
   getIleExperience,
   saveIleExperience,
@@ -67,6 +69,7 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
   const editor = useIleEditor();
   const { state: editorState, setExperience, setFreshCanvas, send, cancel, undo, redo } =
     editor;
+  const contextStream = useIleContextGeneration();
 
   const [saved, setSaved] = useState<IleExperienceResponse | null>(null);
   const [title, setTitle] = useState('Untitled Experience');
@@ -560,12 +563,29 @@ export function TeacherILEWorkspace({ experienceId, defaults }: TeacherILEWorksp
           state={editorState}
           api={editor}
           onSubmit={send}
+          onContextSelected={(args) => {
+            // Fire the context SSE stream. The ChatPane composer
+            // already collected the URL + prompt via the dialog.
+            if (!courseId || !courseVersionId) {
+              toast.error('Open this experience from a course item to use context.');
+              return;
+            }
+            contextStream.start({
+              source: args.source,
+              input: args.input,
+              prompt: args.prompt,
+              courseId,
+              courseVersionId,
+              itemId,
+            });
+          }}
+          contextDisabled={contextStream.state.status === 'streaming'}
           composerHidden={!isConfigured}
-          configHint={
+          configHint={{
             configState === 'loading'
               ? 'Checking your saved configuration…'
               : 'Save the form above to enable generation. Your key is stored per teacher.'
-          }
+          }}
         />
         <EditorSplitPane
           editorHandleRef={editorHandleRef}
