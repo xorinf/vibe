@@ -343,7 +343,11 @@ function runYtDlp(
         );
         return;
       }
-      if (s.includes('not available in your country')) {
+      // Match both the verbatim YouTube phrasing ("not available in
+      // your country") and the alternate ("...has not made this video
+      // available in your country"). Better to surface region-block
+      // than to mask it as transient.
+      if (s.includes('not available in your country') || s.includes('available in your country')) {
         fail(
           new ContextProviderError(
             'yt-dlp: region blocked',
