@@ -8,6 +8,11 @@ import {
   IleStudentEvent,
   IleStudentEventKind,
 } from '../classes/transformers/IleStudentProgress.js';
+import {
+  aggregateTimeSeries,
+  computeDropOffCurve,
+  startOfUtcDay,
+} from '../analyticsHelpers.js';
 
 /**
  * Salt used when computing the per-student hash. We rotate this if we
@@ -26,17 +31,17 @@ const ALLOWED_KINDS: ReadonlySet<IleStudentEventKind> = new Set([
 ]);
 
 /**
- * Compute the stable per-(student, experience) hash. We never see the
- * raw token and never persist it. Different experiences produce
+ * Compute the stable per-(student, experience) hash from a verified
+ * application user id. We never persist the raw id. Different experiences produce
  * different hashes for the same student (so progress is per-experience).
  */
-export function hashStudent(authToken: string, experienceId: string): string {
+export function hashStudent(studentId: string, experienceId: string): string {
   const h = createHash('sha256');
   h.update(STUDENT_HASH_SALT);
   h.update(':');
   h.update(experienceId);
   h.update(':');
-  h.update(authToken);
+  h.update(studentId);
   return h.digest('hex').slice(0, 24);
 }
 
@@ -208,10 +213,10 @@ export class IleAnalyticsService {
     experienceId: string;
     courseId: string;
     courseVersionId: string;
-    authToken: string;
+    studentId: string;
     events: IleEventBatch[];
   }): Promise<{ studentHash: string; applied: number }> {
-    const studentHash = hashStudent(args.authToken, args.experienceId);
+    const studentHash = hashStudent(args.studentId, args.experienceId);
     let applied = 0;
     for (const raw of args.events) {
       const event = sanitiseEvent(raw);
@@ -316,6 +321,170 @@ export class IleAnalyticsService {
       totals: { ...totals, averageCompletionRate, averageEngagementPerMin },
     };
   }
+
+  // ───────────────────────────────────────────────────────────────────
+  // Learning-intelligence surface
+  // ───────────────────────────────────────────────────────────────────
+
+  /**
+   * Daily time series for an experience. Window defaults to the
+   * last 30 days. Days with no events are zero-filled so the chart
+   * doesn't have gaps.
+   */
+  async timeSeries(
+    experienceId: string,
+    opts: { from?: Date; to?: Date; days?: number } = {},
+  ): Promise<TimeSeriesAnalytics> {
+    const to = opts.to ? startOfUtcDay(opts.to) : startOfUtcDay(new Date());
+    const from = opts.from
+      ? startOfUtcDay(opts.from)
+      : new Date(
+          to.getTime() -
+            (opts.days ?? 30) * 24 * 60 * 60 * 1000 +
+            24 * 60 * 60 * 1000,
+        );
+    const rows = await this.repo.listForExperienceSince(experienceId, from);
+    const series = aggregateTimeSeries(rows, from, to);
+    return {
+      experienceId,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      bucket: 'day' as const,
+      series,
+    };
+  }
+  /**
+   * Drop-off curve at 10% steps. For each bin we count the fraction of
+   * students whose `lastProgressPct` was ever at or above that bin.
+   * The largest single-bin drop is returned as `largestDrop` so the
+   * insights layer can flag a "confusing section" without re-scanning.
+   */
+  async dropOffCurve(experienceId: string): Promise<DropOffCurve> {
+    const rows = await this.repo.listForExperience(experienceId);
+    return computeDropOffCurve(experienceId, rows);
+  }
+
+  /**
+   * Deterministic rule-based insights. We deliberately do NOT call an
+   * LLM here — the brief is "AI Insights" but a small rule-set gives
+   * the same signal at zero cost and zero latency. The rules:
+   *
+   *   1. completionRate < 0.4        → "very few finish" warning
+   *   2. errorRate > 0.3              → "lots of runtime errors" warning
+   *   3. dropOff.largestDrop.magnitude > 0.2  → "confusing section"
+   *      in the bin range, with a concrete suggestion
+   *   4. resumeCount > 0 and lastProgressPct < 80 → "students keep
+   *      coming back, suggest a checkpoint"
+   *   5. retryCount > averageTimeActiveMs / 60000 → "high retry pressure
+   *      compared to engagement" (info)
+   */
+  async insights(
+    experienceId: string,
+  ): Promise<AnalyticsInsight[]> {
+    const [summary, curve] = await Promise.all([
+      this.summarise(experienceId, {}),
+      this.dropOffCurve(experienceId),
+    ]);
+    const out: AnalyticsInsight[] = [];
+
+    if (summary.studentsStarted >= 3 && summary.completionRate < 0.4) {
+      out.push({
+        id: 'low-completion',
+        severity: 'warning',
+        title: 'Very few students finish',
+        body: `Only ${(summary.completionRate * 100).toFixed(0)}% of ${summary.studentsStarted} students complete the experience.`,
+        scope: { progressFrom: 0, progressTo: 100 },
+        suggestion:
+          'Look at the drop-off curve below to see where students stop, then simplify that section.',
+      });
+    }
+
+    if (summary.studentsStarted >= 3 && summary.errorRate > 0.3) {
+      out.push({
+        id: 'high-errors',
+        severity: summary.errorRate > 0.6 ? 'critical' : 'warning',
+        title: 'High error rate',
+        body: `Students are hitting ${summary.errorRate.toFixed(2)} runtime errors per session on average.`,
+        scope: { progressFrom: 0, progressTo: 100 },
+        suggestion:
+          'Open the experience in preview and walk through the same flows that produce the errors; the runtime SDK surfaces the error message in the console.',
+      });
+    }
+
+    if (curve.largestDrop.magnitude > 0.2 && summary.studentsStarted >= 3) {
+      out.push({
+        id: 'confusing-section',
+        severity: curve.largestDrop.magnitude > 0.4 ? 'critical' : 'warning',
+        title: `Confusing section: ${curve.largestDrop.fromPct}% → ${curve.largestDrop.toPct}%`,
+        body: `${(curve.largestDrop.magnitude * 100).toFixed(0)}% of students who reached ${curve.largestDrop.fromPct}% never made it to ${curve.largestDrop.toPct}%.`,
+        scope: {
+          progressFrom: curve.largestDrop.fromPct,
+          progressTo: curve.largestDrop.toPct,
+        },
+        suggestion:
+          'This is the largest single-bin drop-off. Consider adding a hint, breaking the section into smaller steps, or rewording the instructions.',
+      });
+    }
+
+    const totalResumes = summary.students.reduce((a, s) => a + s.resumeCount, 0);
+    if (totalResumes > 0 && summary.averageProgressPct < 80) {
+      out.push({
+        id: 'resume-without-completion',
+        severity: 'info',
+        title: 'Students keep coming back',
+        body: `${totalResumes} resume event${totalResumes === 1 ? '' : 's'} on a cohort that hasn't completed yet — the experience holds attention.`,
+        scope: { progressFrom: 0, progressTo: 100 },
+        suggestion:
+          'Surface a clear "continue where you left off" affordance so returning students land at their resume point rather than the start.',
+      });
+    }
+
+    if (
+      summary.totalRetries > 0 &&
+      summary.studentsStarted > 0 &&
+      summary.totalRetries / summary.studentsStarted > Math.max(3, summary.averageTimeActiveMs / 60000)
+    ) {
+      out.push({
+        id: 'retry-pressure',
+        severity: 'info',
+        title: 'High retry pressure',
+        body: `${summary.totalRetries} retries across ${summary.studentsStarted} students — well above the engagement rate.`,
+        scope: { progressFrom: 0, progressTo: 100 },
+        suggestion:
+          'Check whether the experience has a control that misfires (e.g. a quiz with no clear "next" button). Retries are a strong signal of friction.',
+      });
+    }
+
+    return out;
+  }
+
+  /**
+   * Compare two experiences. Both must be owned by the same teacher
+   * (the controller enforces that). Returns both summaries plus a
+   * pre-computed delta for the headline numbers.
+   */
+  async compare(
+    a: { experienceId: string; title?: string },
+    b: { experienceId: string; title?: string },
+  ): Promise<CompareAnalytics> {
+    const [aSummary, bSummary] = await Promise.all([
+      this.summarise(a.experienceId, { title: a.title }),
+      this.summarise(b.experienceId, { title: b.title }),
+    ]);
+    return {
+      a: { ...aSummary, experienceId: a.experienceId, title: a.title },
+      b: { ...bSummary, experienceId: b.experienceId, title: b.title },
+      delta: {
+        completionRate: aSummary.completionRate - bSummary.completionRate,
+        averageTimeActiveMs:
+          aSummary.averageTimeActiveMs - bSummary.averageTimeActiveMs,
+        errorRate: aSummary.errorRate - bSummary.errorRate,
+        difficultyScore: aSummary.difficultyScore - bSummary.difficultyScore,
+        averageEngagementPerMinute:
+          aSummary.averageEngagementPerMinute - bSummary.averageEngagementPerMinute,
+      },
+    };
+  }
 }
 
 function summariseRows(
@@ -408,4 +577,101 @@ function summariseRows(
 
 function clamp(min: number, max: number, value: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Learning intelligence — time series, drop-off, insights, compare
+// ─────────────────────────────────────────────────────────────────────
+
+/** One day in a time series. Date is normalised to UTC midnight. */
+export interface AnalyticsBucket {
+  /** ISO date (UTC midnight) marking the start of the bucket. */
+  date: string;
+  /** Distinct students who started in this window. */
+  studentsStarted: number;
+  /** Distinct students who completed in this window. */
+  studentsCompleted: number;
+  /** Sum of all errors recorded in this window. */
+  errors: number;
+  /** Sum of all retries recorded in this window. */
+  retries: number;
+  /** Sum of all resume events recorded in this window. */
+  resumes: number;
+  /** Mean of the per-row `timeActiveMs` delta within the window. */
+  averageTimeActiveMs: number;
+}
+
+/**
+ * Time series for an experience, daily resolution. The window is
+ * inclusive of `from` and `to` (both in UTC). The result is always
+ * `days(to - from + 1)` long; missing days are zero-filled.
+ */
+export interface TimeSeriesAnalytics {
+  experienceId: string;
+  from: string;
+  to: string;
+  bucket: 'day';
+  series: AnalyticsBucket[];
+}
+
+/**
+ * Drop-off curve. For each progress bin (0..100 in 10% steps), the
+ * fraction of students whose `lastProgressPct` ever exceeded that bin
+ * (i.e. they made it that far at some point). A monotonic-ish curve
+ * that should fall as the lesson progresses; sharp drops are the
+ * insights AI suggests look at.
+ */
+export interface DropOffCurve {
+  experienceId: string;
+  /** Bin 0..100 in 10% steps. */
+  bins: { pct: number; reachedBy: number; total: number }[];
+  /**
+   * Largest single-bin drop. > 0.2 (20 percentage points) is a strong
+   * "confusing section" signal; the AI insights layer uses it.
+   */
+  largestDrop: { fromPct: number; toPct: number; magnitude: number };
+}
+
+/**
+ * Heuristic insights about an experience. Each item is a real
+ * finding the dashboard surfaces as an actionable card. We are
+ * deliberately not calling any LLM here — the brief says "AI
+ * Insights" but the data is small enough that a deterministic
+ * rule-set gives the teacher the same signal without the cost.
+ */
+export type InsightSeverity = 'info' | 'warning' | 'critical';
+
+export interface AnalyticsInsight {
+  id: string;
+  severity: InsightSeverity;
+  title: string;
+  /**
+   * Plain-English description. We deliberately keep this short so the
+   * UI can render it in a single line card.
+   */
+  body: string;
+  /** Where the insight points to, in the experience's coordinate system. */
+  scope: {
+    /** Inclusive lower bound (e.g. 40 → "between 40% and 50%"). */
+    progressFrom: number;
+    /** Inclusive upper bound. */
+    progressTo: number;
+  };
+  /** Suggested action the teacher can take. */
+  suggestion: string;
+}
+
+/** Compare A vs B for a single teacher's experience library. */
+export interface CompareAnalytics {
+  a: ExperienceAnalytics & { experienceId: string; title?: string };
+  b: ExperienceAnalytics & { experienceId: string; title?: string };
+  /** Pre-computed deltas (a - b) for the headline numbers so the UI
+   *  can render "A is X% more engaging" without redoing the math. */
+  delta: {
+    completionRate: number;
+    averageTimeActiveMs: number;
+    errorRate: number;
+    difficultyScore: number;
+    averageEngagementPerMinute: number;
+  };
 }
