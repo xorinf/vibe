@@ -1,13 +1,14 @@
-import { injectable } from 'inversify';
+import { injectable, inject } from 'inversify';
 import { Collection, ObjectId } from 'mongodb';
 import { MongoDatabase } from '#shared/database/index.js';
+import { GLOBAL_TYPES } from '#root/types.js';
 import { IleAsset, IleAssetKind } from '../classes/transformers/IleAsset.js';
 
 const COLLECTION = 'ile_assets';
 
 @injectable()
 export class IleAssetRepository {
-  constructor(private readonly db: MongoDatabase) {}
+  constructor(@inject(GLOBAL_TYPES.Database) private readonly db: MongoDatabase) {}
 
   private async col(): Promise<Collection<IleAsset>> {
     return this.db.getCollection<IleAsset>(COLLECTION);

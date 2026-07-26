@@ -1,6 +1,7 @@
-import { injectable } from 'inversify';
+import { injectable, inject } from 'inversify';
 import { Collection, ObjectId } from 'mongodb';
 import { MongoDatabase } from '#shared/database/index.js';
+import { GLOBAL_TYPES } from '#root/types.js';
 import { IleStudentProgress, IleStudentEvent } from '../classes/transformers/IleStudentProgress.js';
 
 const COLLECTION = 'ile_student_progress';
@@ -21,7 +22,7 @@ export class IleStudentProgressRepository {
    */
   private indexesReady?: Promise<void>;
 
-  constructor(private readonly db: MongoDatabase) {}
+  constructor(@inject(GLOBAL_TYPES.Database) private readonly db: MongoDatabase) {}
 
   private async col(): Promise<Collection<IleStudentProgress>> {
     await this.ensureIndexes();
