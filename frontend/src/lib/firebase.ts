@@ -35,6 +35,25 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const provider = new GoogleAuthProvider();
 
+// LOCAL-DEV EMULATOR ROUTING -- REVERT BEFORE COMMIT/PR/PUSH (2026-07-26)
+// When VITE_USE_FIREBASE_EMULATOR=true, point the auth client at the
+// local Firebase Auth emulator on 127.0.0.1:9099 instead of the real
+// Firebase project. The flag is set in frontend/.env for local dev only;
+// the .env comment + this inline marker exist so a future commit / PR
+// doesn't accidentally ship the emulator routing to staging or prod.
+if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true') {
+  // connectAuthEmulator signature: (auth, host, { disableWarnings })
+  // import is dynamic so it doesn't run when the flag is off.
+  import('firebase/auth').then(({ connectAuthEmulator }) => {
+    try {
+      connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    } catch (e) {
+      // connectAuthEmulator throws if called twice -- ignore
+      console.warn('[Firebase] connectAuthEmulator skipped:', e);
+    }
+  });
+}
+
 // Firebase authentication functions
 export const loginWithGoogle = async () => {
   const result = await signInWithPopup(auth, provider);
