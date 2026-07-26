@@ -239,11 +239,14 @@ export class IleGenerationService {
       for await (const chunk of stream) {
         if (abort.signal.aborted) break;
         if (chunk.kind === 'text') {
-          html += chunk.delta;
-          chunkCount++;
-          tokenCount += approximateTokens(chunk.delta);
-          responseBytes += Buffer.byteLength(chunk.delta, 'utf8');
-          sse.emit( 'html', { delta: chunk.delta });
+          const cleanDelta = this.sanitizeDeltaForHtml(html, chunk.delta);
+          if (cleanDelta) {
+            html += cleanDelta;
+            chunkCount++;
+            tokenCount += approximateTokens(cleanDelta);
+            responseBytes += Buffer.byteLength(cleanDelta, 'utf8');
+            sse.emit( 'html', { delta: cleanDelta });
+          }
 
           // Fire progress steps as we accumulate HTML.
           if (chunkCount === 8) fireNextStep();
@@ -525,11 +528,14 @@ export class IleGenerationService {
       for await (const chunk of stream) {
         if (abort.signal.aborted) break;
         if (chunk.kind === 'text') {
-          html += chunk.delta;
-          chunkCount++;
-          tokenCount += approximateTokens(chunk.delta);
-          responseBytes += Buffer.byteLength(chunk.delta, 'utf8');
-          sse.emit('html', { delta: chunk.delta });
+          const cleanDelta = this.sanitizeDeltaForHtml(html, chunk.delta);
+          if (cleanDelta) {
+            html += cleanDelta;
+            chunkCount++;
+            tokenCount += approximateTokens(cleanDelta);
+            responseBytes += Buffer.byteLength(cleanDelta, 'utf8');
+            sse.emit('html', { delta: cleanDelta });
+          }
           if (chunkCount === 8) fireNextStep();
           else if (chunkCount === 40) fireNextStep();
           else if (chunkCount === 120) fireNextStep();
@@ -718,11 +724,14 @@ export class IleGenerationService {
       for await (const chunk of stream) {
         if (abort.signal.aborted) break;
         if (chunk.kind === 'text') {
-          html += chunk.delta;
-          chunkCount++;
-          tokenCount += approximateTokens(chunk.delta);
-          responseBytes += Buffer.byteLength(chunk.delta, 'utf8');
-          sse.emit( 'html', { delta: chunk.delta });
+          const cleanDelta = this.sanitizeDeltaForHtml(html, chunk.delta);
+          if (cleanDelta) {
+            html += cleanDelta;
+            chunkCount++;
+            tokenCount += approximateTokens(cleanDelta);
+            responseBytes += Buffer.byteLength(cleanDelta, 'utf8');
+            sse.emit( 'html', { delta: cleanDelta });
+          }
           if (chunkCount === 1) {
             sse.emit( 'progress', { message: '✓ Reading the current version' });
           } else if (chunkCount === 12) {
@@ -910,6 +919,69 @@ export class IleGenerationService {
       ? firstSentence.slice(0, 57) + '...'
       : firstSentence;
     return capped || 'Untitled Experience';
+  }
+
+  /**
+   * Strip the markdown-fence prefix from a streaming delta. The model
+   * is told "no markdown fences" in the system prompt but still emits
+   * them ~30% of the time (especially when the response starts with
+   * `\`\`\`html\n`). If we forward the raw delta to the SSE channel,
+   * the frontend's CodeMirror lang-html parser chokes on the
+   * `\`\`\`` text (MixedParse.startInner → _TreeNode.nextChild
+   * reading .length on undefined), the CodeEditorErrorBoundary fires,
+   * and the editor falls back to a plain <textarea> for the rest of
+   * the session.
+   *
+   * This helper is idempotent: it strips the fence prefix once
+   * (when the cumulative HTML so far starts with `\`\`\`html\n` or
+   * bare `\`\`\`\n`) and the fence suffix once (when the cumulative
+   * ends with `\`\`\`\n`). Everything else passes through. The
+   * result: the very first delta that carries the opening fence
+   * emits an empty string (the consumer advances `html.length` but
+   * the visible preview stays empty until the actual `<!DOCTYPE>`
+   * arrives), and the very last delta that carries the closing
+   * fence emits an empty string. The interim deltas pass through
+   * verbatim.
+   */
+  private sanitizeDeltaForHtml(cumulative: string, delta: string): string {
+    if (!delta) return delta;
+    let trimmed = delta;
+    // Strip leading fence on the first delta (cumulative is still empty
+    // or contains only whitespace when this kicks in).
+    const leadingFence = cumulative.match(/^(\s*```(?:html)?\s*\n?)/i);
+    if (leadingFence && trimmed.startsWith(leadingFence[1])) {
+      trimmed = trimmed.slice(leadingFence[1].length);
+    } else if (/^\s*```(?:html)?\s*\n?/i.test(cumulative + trimmed)) {
+      // The fence prefix is split across the boundary between
+      // cumulative and this delta. Drop just the fence prefix from
+      // this delta; the cumulative already had the backticks.
+      const m = (cumulative + trimmed).match(/^\s*```(?:html)?\s*\n?/i);
+      if (m) {
+        const fenceLen = m[0].length - cumulative.length;
+        if (fenceLen > 0 && trimmed.length >= fenceLen) {
+          trimmed = trimmed.slice(fenceLen);
+        }
+      }
+    }
+    // Strip trailing fence on the last delta. We approximate "last
+    // delta" by checking if the cumulative + trimmed ends with the
+    // fence pattern. This isn't strictly the last delta (we may see
+    // a partial ```, then more HTML, then ``` again) but the helper
+    // is idempotent — calling it twice on the same string produces
+    // the same result.
+    const combined = cumulative + trimmed;
+    const trailingFence = combined.match(/\n?```\s*$/);
+    if (trailingFence) {
+      const tailStart = combined.length - trailingFence[0].length;
+      if (tailStart >= cumulative.length) {
+        trimmed = trimmed.slice(0, trimmed.length - (combined.length - tailStart));
+      } else {
+        // Trailing fence is split across the boundary — drop the
+        // portion that falls in this delta.
+        trimmed = trimmed.slice(0, trimmed.length - (combined.length - tailStart));
+      }
+    }
+    return trimmed;
   }
 
   /**
