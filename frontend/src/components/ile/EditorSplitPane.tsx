@@ -23,8 +23,32 @@ export type { ViewMode };
  * for this and the user loses chat + preview along with the
  * editor). The boundary swaps the editor for a plain <pre> of
  * the same code so the workspace keeps functioning.
+ *
+ * Recovery: the boundary accepts a `streamStatus` prop and uses it
+ * as part of its React key. When the stream transitions from
+ * 'streaming' to 'done', the key changes and React unmounts the
+ * stale boundary subtree (including its captured error state) and
+ * remounts a fresh one — CodeMirror comes back for the next edit
+ * instead of staying on the plain-<textarea> fallback for the
+ * rest of the session.
  */
-class CodeEditorErrorBoundary extends Component<
+function CodeEditorErrorBoundary({
+  children,
+  fallback,
+  streamStatus,
+}: {
+  children: ReactNode;
+  fallback: ReactNode;
+  streamStatus: string;
+}) {
+  return (
+    <ErrorBoundaryImpl fallback={fallback} key={`editor-${streamStatus}`}>
+      {children}
+    </ErrorBoundaryImpl>
+  );
+}
+
+class ErrorBoundaryImpl extends Component<
   {
     children: ReactNode;
     fallback: ReactNode;
@@ -162,6 +186,7 @@ export function EditorSplitPane({
               <SourceSubHeader isStreaming={isStreaming} />
               <div className="min-h-0 flex-1">
                 <CodeEditorErrorBoundary
+                  streamStatus={streamState.status}
                   fallback={
                     <textarea
                       value={effectiveHtml}
@@ -222,6 +247,7 @@ export function EditorSplitPane({
               <SourceSubHeader isStreaming={isStreaming} />
               <div className="min-h-0 flex-1">
                 <CodeEditorErrorBoundary
+                  streamStatus={streamState.status}
                   fallback={
                     <textarea
                       value={effectiveHtml}
