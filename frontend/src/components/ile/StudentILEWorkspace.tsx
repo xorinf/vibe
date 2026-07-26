@@ -35,7 +35,7 @@ export function StudentILEWorkspace() {
   // Listen to the sandboxed runtime's analytics batches. The hook
   // reads the student's Firebase token from localStorage on every
   // flush, so a logout or token refresh Just Works.
-  useIleEventReporter({ experienceId: id });
+  const { reportAnalytics } = useIleEventReporter({ experienceId: id });
 
   useEffect(() => {
     if (!id) return;
@@ -195,6 +195,7 @@ export function StudentILEWorkspace() {
                 },
               );
             }}
+            onAnalytics={reportAnalytics}
           />
         )}
       </div>
