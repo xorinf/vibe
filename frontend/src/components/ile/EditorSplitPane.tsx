@@ -1,24 +1,18 @@
-import { useEffect, useRef, useState, type Ref } from 'react';
-import {
-  Code,
-  Columns2,
-  Eye,
-  Search,
-  WrapText,
-  Wand2,
-  RotateCcw,
-  RotateCw,
-  Loader2,
-  Save,
-  Check,
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useRef, useState, type Ref } from 'react';
+import { Code } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import { PreviewPane } from './PreviewPane';
 import type { IleStreamState } from './useIleGeneration';
+import { EditorToolbar, type ViewMode } from './EditorToolbar';
+import {
+  Panel,
+  PanelGroup,
+  PanelResizeHandle,
+  type ImperativePanelHandle,
+} from 'react-resizable-panels';
 
-export type ViewMode = 'code' | 'split' | 'preview';
+export type { ViewMode };
 
 export interface EditorSplitPaneProps {
   /**
@@ -45,12 +39,22 @@ export interface EditorSplitPaneProps {
    * next edit starts from the right base.
    */
   onCodeChange: (next: string) => void;
+  /** Optional className passthrough for the outer flex container. */
+  className?: string;
+
   /**
-   * Identifies the experience for analytics + iframe-injected sdk.
-   * Undefined while in fresh-canvas mode.
+   * When the view mode is `split`, the % of the canvas height the
+   * editor occupies. Defaults to 58 (matches the workspace default).
+   * The split ratio is persisted via `splitAutoSaveId` when set.
    */
-  experienceId?: string;
+  splitRatio?: number;
+  onSplitRatioChange?: (n: number) => void;
+  /** Storage key for the resizable split ratio. */
+  splitAutoSaveId?: string;
 }
+
+const RESIZE_HANDLE_H_CLASS =
+  'group relative flex h-1 shrink-0 items-center justify-center bg-slate-200 transition-colors hover:bg-primary data-[resize-handle-state=drag]:bg-primary data-[resize-handle-state=hover]:bg-primary/60 cursor-row-resize';
 
 /**
  * The central authoring surface. Three-way view-mode toggle (Code /
@@ -63,6 +67,10 @@ export interface EditorSplitPaneProps {
  * render and kept in sync via `onChange` + the imperative
  * `setValue` handle. The preview reads `effectiveHtml` directly so
  * it never gets a stale frame when the AI is streaming.
+ *
+ * Split mode uses `react-resizable-panels` so the teacher can drag the
+ * divider; the ratio is persisted via `splitAutoSaveId` when set.
+ * Code and preview modes use a CSS grid.
  */
 export function EditorSplitPane({
   editorHandleRef,
@@ -74,310 +82,161 @@ export function EditorSplitPane({
   wordWrap,
   onWordWrapChange,
   onCodeChange,
-  experienceId,
+  className,
+  splitRatio = 58,
+  onSplitRatioChange,
+  splitAutoSaveId,
 }: EditorSplitPaneProps) {
   // We use a local ref mirror of the imperative editor so the Find
   // button can call `openSearch` without the parent having to
   // re-render. The parent keeps the `editorHandleRef` in sync.
   const localHandleRef = useRef<CodeEditorHandle | null>(null);
-  // Mirror for the React-side editorRef so JSX can hand the same
-  // value to both `handleRef` and our own local ref capture.
   const editorRef = useRef<CodeEditorHandle | null>(null);
-  // Surface a one-shot "search opened" notification so the workspace
-  // can (later) show a global Find hint. Not wired yet.
-  const [, setSearchCount] = useState(0);
+  // Mount the resizable panel group only once — `react-resizable-panels`
+  // re-uses its persistence across re-renders, but re-mounting on every
+  // view-mode tick would lose the user's drag.
+  const [resizableMounted] = useState(true);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-slate-50">
+    <div className={cn('flex h-full min-h-0 flex-col bg-slate-50', className)}>
       <EditorToolbar
         viewMode={viewMode}
         onViewModeChange={onViewModeChange}
         wordWrap={wordWrap}
         onWordWrapChange={onWordWrapChange}
-        isStreaming={isStreaming}
-        onOpenSearch={() => {
-          localHandleRef.current?.openSearch();
-          setSearchCount((c) => c + 1);
-        }}
+        onOpenSearch={() => localHandleRef.current?.openSearch()}
         onFormat={() => localHandleRef.current?.format()}
         isEditorReady={Boolean(editorRef.current)}
       />
 
-      <div className="grid min-h-0 flex-1 overflow-hidden">
-        {/* Code editor column — visible in 'code' and 'split'. */}
-        {(viewMode === 'code' || viewMode === 'split') && (
-          <div
-            className={cn(
-              'flex h-full min-h-0 flex-col border-r border-slate-200 bg-white',
-              viewMode === 'split' ? 'w-1/2' : 'w-full',
-            )}
-          >
-            <div className="flex items-center justify-between border-b bg-slate-50 px-3 py-1.5 text-[11px] font-medium text-slate-600">
-              <span className="flex items-center gap-1.5">
-                <Code className="h-3 w-3" /> Source
-              </span>
-              <span className="text-[10px] text-slate-400">
-                {isStreaming
-                  ? 'AI editing — manual changes are paused'
-                  : 'Click to edit; ⌘S to save'}
-              </span>
+      {/* Body — split mode uses a drag-resizable panel group; the
+          other modes use a CSS grid. The split path is mounted only
+          once so its persistence survives toolbar re-renders. */}
+      {viewMode === 'split' && resizableMounted ? (
+        <PanelGroup
+          direction="vertical"
+          autoSaveId={splitAutoSaveId}
+          onLayout={(sizes: number[]) => {
+            const first = sizes[0];
+            if (typeof first === 'number' && first > 1 && first < 99) {
+              onSplitRatioChange?.(first);
+            }
+          }}
+          className="min-h-0 flex-1"
+        >
+          <Panel id="code" order={1} defaultSize={splitRatio} minSize={20}>
+            <div className="flex h-full min-h-0 flex-col bg-white">
+              <SourceSubHeader isStreaming={isStreaming} />
+              <div className="min-h-0 flex-1">
+                <CodeEditor
+                  value={effectiveHtml}
+                  onChange={onCodeChange}
+                  wordWrap={wordWrap}
+                  readOnly={isStreaming}
+                  handleRef={(handle) => {
+                    localHandleRef.current = handle;
+                    editorRef.current = handle;
+                    if (typeof editorHandleRef === 'function') {
+                      editorHandleRef(handle);
+                    } else if (editorHandleRef) {
+                      (editorHandleRef as { current: CodeEditorHandle | null }).current =
+                        handle;
+                    }
+                  }}
+                  className="h-full w-full overflow-auto"
+                  aria-label="Experience HTML source"
+                />
+              </div>
             </div>
-            <div className="min-h-0 flex-1">
-              <CodeEditor
-                value={effectiveHtml}
-                onChange={onCodeChange}
-                wordWrap={wordWrap}
-                readOnly={isStreaming}
-                handleRef={(handle) => {
-                  // Capture locally for the toolbar buttons AND forward
-                  // to the parent's ref.
-                  localHandleRef.current = handle;
-                  editorRef.current = handle;
-                  if (typeof editorHandleRef === 'function') {
-                    editorHandleRef(handle);
-                  } else if (editorHandleRef) {
-                    (editorHandleRef as { current: CodeEditorHandle | null }).current =
-                      handle;
-                  }
-                }}
-                className="h-full w-full overflow-auto"
-                aria-label="Experience HTML source"
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Preview column — visible in 'preview' and 'split'. */}
-        {(viewMode === 'preview' || viewMode === 'split') && (
-          <div
-            className={cn(
-              'h-full min-h-0',
-              viewMode === 'split' ? 'w-1/2' : 'w-full',
-            )}
-          >
+          </Panel>
+          <PanelResizeHandle className={RESIZE_HANDLE_H_CLASS}>
+            <span className="sr-only">Resize code / preview</span>
+          </PanelResizeHandle>
+          <Panel id="preview" order={2} defaultSize={100 - splitRatio} minSize={20}>
             <PreviewPane
-              // We always render PreviewPane; it shows a friendly empty
-              // state when streamState.html is empty AND manualHtml
-              // is null. The workspace passes the effective html via
-              // `state` so the iframe always reflects the latest content.
               state={
                 streamState.status !== 'idle' || effectiveHtml
                   ? { ...streamState, html: effectiveHtml }
                   : { ...streamState, html: '' }
               }
             />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// Toolbar
-// ─────────────────────────────────────────────────────────────────────
-
-interface EditorToolbarProps {
-  viewMode: ViewMode;
-  onViewModeChange: (m: ViewMode) => void;
-  wordWrap: boolean;
-  onWordWrapChange: (w: boolean) => void;
-  isStreaming: boolean;
-  onOpenSearch: () => void;
-  onFormat: () => void;
-  isEditorReady: boolean;
-}
-
-function EditorToolbar({
-  viewMode,
-  onViewModeChange,
-  wordWrap,
-  onWordWrapChange,
-  isStreaming,
-  onOpenSearch,
-  onFormat,
-  isEditorReady,
-}: EditorToolbarProps) {
-  return (
-    <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 bg-white px-2 py-1.5">
-      <ViewModeSwitch value={viewMode} onChange={onViewModeChange} />
-
-      <Divider />
-
-      <ToolbarButton
-        icon={<Search className="h-3.5 w-3.5" />}
-        label="Find"
-        shortcut="⌘F"
-        onClick={onOpenSearch}
-        disabled={!isEditorReady}
-      />
-      <ToolbarButton
-        icon={<Wand2 className="h-3.5 w-3.5" />}
-        label="Format"
-        shortcut="⌘⇧F"
-        onClick={onFormat}
-        disabled={!isEditorReady}
-      />
-      <ToolbarButton
-        icon={<WrapText className="h-3.5 w-3.5" />}
-        label={wordWrap ? 'Word wrap on' : 'Word wrap off'}
-        onClick={() => onWordWrapChange(!wordWrap)}
-        active={wordWrap}
-        disabled={!isEditorReady}
-      />
-
-      <Divider />
-
-      <SaveIndicator isStreaming={isStreaming} />
-
-      <div className="ml-auto" />
-
-      <ToolbarButton
-        icon={
-          isStreaming ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Save className="h-3.5 w-3.5" />
-          )
-        }
-        label={isStreaming ? 'AI editing…' : 'Live sync'}
-        onClick={() => {}}
-        active={!isStreaming}
-        disabled
-      />
-    </div>
-  );
-}
-
-function Divider() {
-  return <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden="true" />;
-}
-
-interface ToolbarButtonProps {
-  icon: React.ReactNode;
-  label: string;
-  shortcut?: string;
-  onClick: () => void;
-  active?: boolean;
-  disabled?: boolean;
-}
-
-function ToolbarButton({
-  icon,
-  label,
-  shortcut,
-  onClick,
-  active,
-  disabled,
-}: ToolbarButtonProps) {
-  return (
-    <Button
-      size="sm"
-      variant="ghost"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={shortcut ? `${label} (${shortcut})` : label}
-      title={shortcut ? `${label} (${shortcut})` : label}
-      className={cn(
-        'h-7 gap-1 px-2 text-xs',
-        active ? 'bg-violet-50 text-violet-700 hover:bg-violet-100' : 'text-slate-600 hover:text-slate-900',
-        disabled && 'opacity-40',
-      )}
-    >
-      {icon}
-      <span className="hidden md:inline">{label}</span>
-      {shortcut && (
-        <span className="hidden lg:inline text-[10px] text-slate-400">
-          {shortcut}
-        </span>
-      )}
-    </Button>
-  );
-}
-
-function ViewModeSwitch({
-  value,
-  onChange,
-}: {
-  value: ViewMode;
-  onChange: (v: ViewMode) => void;
-}) {
-  return (
-    <div
-      className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 p-0.5"
-      role="radiogroup"
-      aria-label="View mode"
-    >
-      <ViewModeButton
-        current={value}
-        target="code"
-        icon={<Code className="h-3.5 w-3.5" />}
-        onChange={onChange}
-      />
-      <ViewModeButton
-        current={value}
-        target="split"
-        icon={<Columns2 className="h-3.5 w-3.5" />}
-        onChange={onChange}
-      />
-      <ViewModeButton
-        current={value}
-        target="preview"
-        icon={<Eye className="h-3.5 w-3.5" />}
-        onChange={onChange}
-      />
-    </div>
-  );
-}
-
-function ViewModeButton({
-  current,
-  target,
-  icon,
-  onChange,
-}: {
-  current: ViewMode;
-  target: ViewMode;
-  icon: React.ReactNode;
-  onChange: (v: ViewMode) => void;
-}) {
-  const active = current === target;
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={() => onChange(target)}
-      className={cn(
-        'inline-flex h-6 w-7 items-center justify-center rounded-sm transition-colors',
-        active
-          ? 'bg-white text-violet-700 shadow-sm'
-          : 'text-slate-500 hover:text-slate-800',
-      )}
-      title={target === 'code' ? 'Code only' : target === 'split' ? 'Split view' : 'Preview only'}
-    >
-      {icon}
-    </button>
-  );
-}
-
-function SaveIndicator({ isStreaming }: { isStreaming: boolean }) {
-  return (
-    <div
-      className="flex items-center gap-1.5 px-2 text-[10px] font-medium uppercase tracking-wider text-slate-500"
-      title={isStreaming ? 'AI is editing the document' : 'In sync with the saved document'}
-    >
-      {isStreaming ? (
-        <>
-          <Loader2 className="h-3 w-3 animate-spin" />
-          <span>AI editing</span>
-        </>
+          </Panel>
+        </PanelGroup>
       ) : (
-        <>
-          <Check className="h-3 w-3 text-emerald-500" />
-          <span>Live</span>
-        </>
+        <div className="grid min-h-0 flex-1 overflow-hidden">
+          {/* Code editor column — visible in 'code' and 'split'. */}
+          {(viewMode === 'code' || viewMode === 'split') && (
+            <div
+              className={cn(
+                'flex h-full min-h-0 flex-col border-r border-slate-200 bg-white',
+                viewMode === 'split' ? 'w-1/2' : 'w-full',
+              )}
+            >
+              <SourceSubHeader isStreaming={isStreaming} />
+              <div className="min-h-0 flex-1">
+                <CodeEditor
+                  value={effectiveHtml}
+                  onChange={onCodeChange}
+                  wordWrap={wordWrap}
+                  readOnly={isStreaming}
+                  handleRef={(handle) => {
+                    localHandleRef.current = handle;
+                    editorRef.current = handle;
+                    if (typeof editorHandleRef === 'function') {
+                      editorHandleRef(handle);
+                    } else if (editorHandleRef) {
+                      (editorHandleRef as { current: CodeEditorHandle | null }).current =
+                        handle;
+                    }
+                  }}
+                  className="h-full w-full overflow-auto"
+                  aria-label="Experience HTML source"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Preview column — visible in 'preview' and 'split'. */}
+          {(viewMode === 'preview' || viewMode === 'split') && (
+            <div
+              className={cn(
+                'h-full min-h-0',
+                viewMode === 'split' ? 'w-1/2' : 'w-full',
+              )}
+            >
+              <PreviewPane
+                // We always render PreviewPane; it shows a friendly empty
+                // state when streamState.html is empty AND manualHtml
+                // is null. The workspace passes the effective html via
+                // `state` so the iframe always reflects the latest content.
+                state={
+                  streamState.status !== 'idle' || effectiveHtml
+                    ? { ...streamState, html: effectiveHtml }
+                    : { ...streamState, html: '' }
+                }
+              />
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
 }
+
+function SourceSubHeader({ isStreaming }: { isStreaming: boolean }) {
+  return (
+    <div className="flex h-7 shrink-0 items-center justify-between border-b bg-slate-50 px-3 text-[11px] font-medium text-slate-600">
+      <span className="flex items-center gap-1.5">
+        <Code className="h-3 w-3" /> Source
+      </span>
+      <span className="text-[10px] text-slate-400">
+        {isStreaming
+          ? 'AI editing — manual changes are paused'
+          : 'Click to edit; ⌘S to save'}
+      </span>
+    </div>
+  );
+}
+
+// Re-export for the workspace to type-check its legacy callers.
+export type { ImperativePanelHandle };
