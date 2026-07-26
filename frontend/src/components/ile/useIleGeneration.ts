@@ -58,10 +58,4 @@ export interface IleStreamState {
   latencyMs?: number;
   /** The most recent computed estimated cost in USD (server-side). */
   costUsd?: number;
-  /**
-   * Bumped on accept()/reject() so consumers (the workspace, the
-   * chat diff banner) can react without watching the full stream
-   * object. Same epoch millis convention as lastDeltaAt.
-   */
-  lastAppliedAt?: number;
 }

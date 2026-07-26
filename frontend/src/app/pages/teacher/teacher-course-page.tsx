@@ -63,6 +63,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/utils/utils";
 import { QuestionUploadDialog } from "@/components/question-upload-dialog";
+import { IleWorkspaceDialog } from "@/components/ile/IleWorkspaceDialog";
 import ConfirmationModal from "./components/confirmation-modal";
 import { useMatches, Link } from "@tanstack/react-router";
 import {
@@ -471,6 +472,17 @@ function TeacherCourseContent() {
   } | null>(null);
   const [quizCsvDialogOpen, setQuizCsvDialogOpen] = useState(false);
 
+  // ILE (Interactive Playground) workspace dialog state.
+  // When the teacher picks "Interactive Playground" from the Add Item
+  // dropdown, we capture the course/section context, open the dialog,
+  // and let the workspace handle the rest (no course-item API call --
+  // ILEs live in their own interactive_experiences collection).
+  const [ileWorkspaceOpen, setIleWorkspaceOpen] = useState(false);
+  const [ileCourseContext, setIleCourseContext] = useState<{
+    courseId: string;
+    courseVersionId: string;
+    itemId?: string;
+  } | null>(null);
 
 
   const updateItemOptional = useUpdateItemOptional();
@@ -2269,15 +2281,14 @@ function TeacherCourseContent() {
                                                       setShowCSVUpload(true);
                                                     }
                                                     else if (type === "ile") {
-                                                      // Navigate to the dedicated /teacher/ile/new page. The page
-                                                      // reads courseId/courseVersionId/itemId from URL search
-                                                      // params and forwards them to TeacherILEWorkspace as defaults.
-                                                      const params = new URLSearchParams();
-                                                      if (courseId) params.set("courseId", courseId);
-                                                      if (versionId) params.set("courseVersionId", versionId);
-                                                      if (section.sectionId) params.set("itemId", section.sectionId);
-                                                      const qs = params.toString();
-                                                      window.location.href = "/teacher/ile/new" + (qs ? "?" + qs : "");
+                                                      // Open the ILE workspace dialog instead of creating a course
+                                                      // item -- ILEs live in the interactive_experiences collection.
+                                                      setIleCourseContext({
+                                                        courseId: courseId || "",
+                                                        courseVersionId: versionId || "",
+                                                        itemId: section.sectionId,
+                                                      });
+                                                      setIleWorkspaceOpen(true);
                                                     }
                                                     else {
                                                       setActiveSectionInfo({ moduleId: module.moduleId, sectionId: section.sectionId });
@@ -3646,6 +3657,12 @@ function TeacherCourseContent() {
         />
       )}
 
+      <IleWorkspaceDialog
+        open={ileWorkspaceOpen}
+        onOpenChange={setIleWorkspaceOpen}
+        experienceId={undefined}
+        defaults={ileCourseContext ?? undefined}
+      />
     </ResizablePanelGroup>
   );
 }
