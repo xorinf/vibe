@@ -122,6 +122,12 @@ export interface AiConfigPanelProps {
    */
   onConfiguredChange?: (configured: boolean) => void;
   /**
+   * Fired exactly once per successful save. Distinct from
+   * `onConfiguredChange` so the parent can close the dialog on save
+   * without also closing it on every load-on-mount.
+   */
+  onSaved?: () => void;
+  /**
    * Legacy `forceExpand` — kept for backward compatibility with any
    * callers still passing the old banner-style prop. The new design
    * ignores it (the chip never occupies vertical space).
@@ -160,6 +166,7 @@ export interface UseAiConfigStateResult {
 
 function useAiConfigState(
   onConfiguredChange?: (configured: boolean) => void,
+  onSaved?: () => void,
 ): UseAiConfigStateResult {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -289,6 +296,7 @@ function useAiConfigState(
         });
         setHasTested(true);
         onConfiguredChange?.(true);
+        onSaved?.();
         toast.success('AI configuration saved.');
       } catch (err: unknown) {
         if (cancelledRef.current) return;
@@ -511,18 +519,8 @@ export function AiConfigFormBody({
 }: AiConfigFormBodyProps & {
   onConfiguredChange?: (configured: boolean) => void;
 }) {
-  const internal = useAiConfigState(onConfiguredChange);
+  const internal = useAiConfigState(onConfiguredChange, onSaved);
   const s = externalState ?? internal;
-
-  // Wrap save so we can fire `onSaved` after the API call resolves
-  // successfully. We re-use the hook's save so all validation logic
-  // stays in one place.
-  const handleSaveAndNotify = () => {
-    s.handleSave();
-    // Fire-and-forget: the hook's handleSave already toasts on success
-    // and updates status. The parent only needs a hint to close.
-    queueMicrotask(() => onSaved?.());
-  };
 
   if (s.loading) {
     return (
@@ -666,7 +664,7 @@ export function AiConfigFormBody({
         </Button>
         <Button
           size="lg"
-          onClick={handleSaveAndNotify}
+          onClick={s.handleSave}
           disabled={s.saving || s.testing}
           className="bg-primary hover:bg-primary/90"
         >

@@ -531,7 +531,6 @@ export function TeacherILEWorkspace({
         <div className="ml-auto flex items-center gap-1.5">
           <AiConfigPanel
             mode="chip"
-            key={`chip-${configState}`}
             onRequestEdit={() => setAiConfigOpen(true)}
             onConfiguredChange={(configured) =>
               setConfigState(configured ? 'configured' : 'unconfigured')
@@ -679,11 +678,18 @@ export function TeacherILEWorkspace({
           </DialogHeader>
           <div className="px-5 py-4">
             <AiConfigFormBody
-              key={aiConfigOpen ? 'open' : 'closed'}
               onConfiguredChange={(configured: boolean) => {
+                // Reflect configured/unconfigured into the chip. The
+                // dialog itself closes on Save (handled via the
+                // separate onSaved callback), not here — closing on
+                // every onConfiguredChange call from the load-on-mount
+                // effect was making the dialog open-and-immediately-
+                // close on the second open because the body was firing
+                // onConfiguredChange(true) the moment it finished
+                // loading the saved config.
                 setConfigState(configured ? 'configured' : 'unconfigured');
-                if (configured) setAiConfigOpen(false);
               }}
+              onSaved={() => setAiConfigOpen(false)}
             />
           </div>
         </DialogContent>

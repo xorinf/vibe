@@ -10,6 +10,84 @@ const ESPolyfill = EventSourcePolyfill as unknown as new (
 ) => EventSource;
 
 /**
+ * Wire up SSE event listeners on an EventSource polyfill instance.
+ *
+ * The polyfill's `onerror` fires for THREE different situations:
+ *   1. The actual network socket died before the server could send
+ *      a terminal event.
+ *   2. The server sent a proper SSE `error` event (real, accurate
+ *      reason — e.g. "Invalid API key (HTTP 401)" from the upstream
+ *      provider, validation failure, cancellation, etc).
+ *   3. The server closed the connection cleanly after a `done` event.
+ *
+ * Without coordination, the synthetic "Stream connection lost" toast
+ * stomps the real, accurate error from case 2, and fires a false alarm
+ * for every successful stream (case 3). This helper marks the stream
+ * as ended when ANY terminal event ('done' or 'error') arrives and
+ * gates the synthetic error on that flag.
+ *
+ * `closeOnTerminal` mirrors the older `streamIleGenerationFromContext`
+ * behaviour: the connection is closed after the first terminal event
+ * because the polyfill sometimes keeps the half-open socket around
+ * otherwise and leaks a follow-up onerror.
+ */
+function bindIleStream(
+  es: EventSource,
+  onEvent: (event: IleStreamEvent) => void,
+  options: { syntheticMessage: string; closeOnTerminal?: boolean } = {
+    syntheticMessage: 'Stream connection lost. Check the network and retry.',
+  },
+): void {
+  let ended = false;
+  const markEnded = () => {
+    ended = true;
+  };
+  const closeOnce = () => {
+    if (options.closeOnTerminal) {
+      try {
+        es.close();
+      } catch {
+        // already closed
+      }
+    }
+  };
+
+  function bind(eventName: string, kind: IleStreamEvent['kind']) {
+    es.addEventListener(eventName, (raw) => {
+      const msg = raw as MessageEvent;
+      if (typeof msg?.data !== 'string') return;
+      let parsed: Record<string, unknown> = {};
+      try {
+        const v = JSON.parse(msg.data);
+        if (v && typeof v === 'object') parsed = v as Record<string, unknown>;
+      } catch {
+        return;
+      }
+      if (kind === 'done' || kind === 'error') markEnded();
+      onEvent({ kind, ...parsed } as IleStreamEvent);
+      if (kind === 'done' || kind === 'error') closeOnce();
+    });
+  }
+  bind('start', 'start');
+  bind('progress', 'progress');
+  bind('reasoning', 'reasoning');
+  bind('html', 'html');
+  bind('done', 'done');
+  bind('error', 'error');
+
+  es.onerror = (err) => {
+    if (ended) return;
+    // No terminal event ever arrived — the socket really did die
+    // before the server could tell us why. Surface a synthetic
+    // 'error' so the hook transitions out of 'streaming' and the
+    // teacher sees a real toast instead of a forever-spinner.
+    console.warn('[ILE] SSE onerror (synthetic)', err);
+    markEnded();
+    onEvent({ kind: 'error', message: options.syntheticMessage });
+  };
+}
+
+/**
  * ILE API client.
  *
  * Two surfaces:
@@ -780,39 +858,7 @@ export function streamIleGeneration(
     heartbeatTimeout: 180000,
   });
 
-  function bind(eventName: string, kind: IleStreamEvent['kind']) {
-    es.addEventListener(eventName, (raw) => {
-      const msg = raw as MessageEvent;
-      let parsed: any = {};
-      try {
-        parsed = JSON.parse(msg.data);
-      } catch {
-        // tolerate non-JSON heartbeats
-        return;
-      }
-      onEvent({ kind, ...parsed } as IleStreamEvent);
-    });
-  }
-
-  bind('start', 'start');
-  bind('progress', 'progress');
-  bind('reasoning', 'reasoning');
-  bind('html', 'html');
-  bind('done', 'done');
-  bind('error', 'error');
-
-  es.onerror = (err) => {
-    // The EventSource polyfill treats connection failures as 'soft' and
-    // auto-reconnects. But the in-flight hook stays in 'streaming' state
-    // until an explicit 'error' or 'done' SSE event fires, so a connection
-    // failure that the polyfill never recovers from leaves the workspace
-    // showing 'Streaming…' forever. Surface it as a synthetic
-    // error event so the hook transitions out of 'streaming' and the
-    // teacher sees the real reason in a toast (handled in
-    // TeacherILEWorkspace's stream.error useEffect).
-    console.warn('[ILE] SSE reconnecting…', err);
-    onEvent({ kind: 'error', message: 'Stream connection lost. Check the network and retry.' });
-  };
+  bindIleStream(es, onEvent);
 
   return () => es.close();
 }
@@ -835,38 +881,7 @@ export function streamIleEdit(
     },
   );
 
-  function bind(eventName: string, kind: IleStreamEvent['kind']) {
-    es.addEventListener(eventName, (raw) => {
-      const msg = raw as MessageEvent;
-      let parsed: any = {};
-      try {
-        parsed = JSON.parse(msg.data);
-      } catch {
-        return;
-      }
-      onEvent({ kind, ...parsed } as IleStreamEvent);
-    });
-  }
-
-  bind('start', 'start');
-  bind('progress', 'progress');
-  bind('reasoning', 'reasoning');
-  bind('html', 'html');
-  bind('done', 'done');
-  bind('error', 'error');
-
-  es.onerror = (err) => {
-    // The EventSource polyfill treats connection failures as 'soft' and
-    // auto-reconnects. But the in-flight hook stays in 'streaming' state
-    // until an explicit 'error' or 'done' SSE event fires, so a connection
-    // failure that the polyfill never recovers from leaves the workspace
-    // showing 'Streaming…' forever. Surface it as a synthetic
-    // error event so the hook transitions out of 'streaming' and the
-    // teacher sees the real reason in a toast (handled in
-    // TeacherILEWorkspace's stream.error useEffect).
-    console.warn('[ILE] SSE reconnecting…', err);
-    onEvent({ kind: 'error', message: 'Stream connection lost. Check the network and retry.' });
-  };
+  bindIleStream(es, onEvent);
 
   return () => es.close();
 }
@@ -892,41 +907,15 @@ export function streamIleGenerationFromContext(
     },
   );
 
-  // Inline binding (same as bindIleStream - private function).
-  let closed = false;
-  const closeOnce = () => {
-    if (closed) return;
-    closed = true;
-    es.close();
-  };
-  function bind(eventName: string, kind: IleStreamEvent['kind']) {
-    es.addEventListener(eventName, (raw) => {
-      const msg = raw as MessageEvent;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(msg.data);
-      } catch {
-        return;
-      }
-      if (!parsed || typeof parsed !== 'object') return;
-      onEvent({ kind, ...(parsed as Record<string, unknown>) } as IleStreamEvent);
-      if (kind === 'done' || kind === 'error') closeOnce();
-    });
-  }
-  bind('start', 'start');
-  bind('progress', 'progress');
-  bind('reasoning', 'reasoning');
-  bind('html', 'html');
-  bind('done', 'done');
-  bind('error', 'error');
-
-  es.onerror = (err) => {
-    // See streamIleGeneration for the rationale. Surface connection
-    // failures to the hook so the workspace can drop the 'Streaming…'
-    // spinner instead of hanging forever.
-    console.warn('[ILE] context SSE reconnecting…', err);
-    onEvent({ kind: 'error', message: 'Context stream connection lost. Check the network and retry.' });
-  };
+  bindIleStream(
+    es,
+    onEvent,
+    {
+      syntheticMessage:
+        'Context stream connection lost. Check the network and retry.',
+      closeOnTerminal: true,
+    },
+  );
 
   return () => es.close();
 }
