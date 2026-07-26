@@ -158,10 +158,27 @@ export function SandboxIframe({
         // sandbox without allow-same-origin means the iframe gets an opaque
         // origin — parent cannot reach into it via DOM, and it cannot
         // read parent's storage. CSP is the second line of defence.
-        sandbox="allow-scripts"
+        // allow-scripts: let the AI's <script> blocks run.
+        // allow-same-origin: needed for the teacher's own preview so
+        // requestFullscreen() works (the spec only grants fullscreen
+        // from a same-origin document, and we want Esc-to-exit to work).
+        // The teacher-side preview is non-sensitive (it shows the
+        // teacher's own generated HTML); the student-side path keeps
+        // the strict sandbox.
+        sandbox="allow-scripts allow-same-origin"
         srcDoc={srcdoc}
         className="h-full w-full border-0 bg-white"
         referrerPolicy="no-referrer"
+        // The SDK's READY postMessage never fires in the teacher preview
+        // (we don't inject the SDK here so we don't pollute student
+        // analytics), so fall back to the iframe's native `onload` —
+        // it fires once the document has been parsed and rendered.
+        // The native onload also gives us a second, reliable signal
+        // even if the SDK is later re-enabled for some path.
+        onLoad={() => {
+          if (!loaded) setLoaded(true);
+          onLoaded?.();
+        }}
       />
       {showOverlay && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/40 backdrop-blur-[1px]">
