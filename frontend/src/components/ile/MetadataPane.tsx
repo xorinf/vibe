@@ -59,9 +59,9 @@ export function MetadataPane({
   }, [savedExperience?._id, savedExperience?.title]);
 
   const status = savedExperience?.status ?? 'draft';
-  const html = state.html || savedExperience?.html || '';
+  const html = state?.html || savedExperience?.html || '';
   const isDirty =
-    state.status === 'done' &&
+    state?.status === 'done' &&
     state.html.length > 0 &&
     state.html !== (savedExperience?.html ?? '');
 

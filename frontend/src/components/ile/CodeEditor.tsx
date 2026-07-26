@@ -175,10 +175,10 @@ export function CodeEditor({
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
-    if (value === lastSetRef.current) return;
-    lastSetRef.current = value;
+    if (value === undefined || value === lastSetRef.current) return;
+    lastSetRef.current = value ?? '';
     view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value },
+      changes: { from: 0, to: view.state.doc.length, insert: value ?? '' },
     });
   }, [value]);
 

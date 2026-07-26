@@ -267,7 +267,7 @@ function CentreStatusBar({
   isStreaming: boolean;
   isError: boolean;
 }) {
-  const charCount = streamState.html.length;
+  const charCount = streamState.html?.length ?? 0;
   // Track online state so the pill flips when the network drops.
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
   useEffect(() => {
