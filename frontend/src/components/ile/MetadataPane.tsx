@@ -72,7 +72,7 @@ export function MetadataPane({
   }
 
   return (
-    <div className={cn('flex h-full flex-col border-l bg-white', className)}>
+    <div className={cn('flex h-full flex-col border-l bg-white dark:bg-slate-900', className)}>
       <div className="border-b px-5 py-3">
         <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Details</h2>
         <p className="text-xs text-slate-500 dark:text-slate-400">

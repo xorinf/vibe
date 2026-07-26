@@ -124,7 +124,7 @@ export function StudentPlayerChrome({
     <div
       className={cn(
         'relative flex h-full w-full flex-col',
-        isDark ? 'bg-slate-950 text-slate-100' : 'bg-white text-slate-900',
+        isDark ? 'bg-slate-950 text-slate-100' : 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100',
         className,
       )}
       data-testid="student-player-chrome"
@@ -149,7 +149,7 @@ export function StudentPlayerChrome({
           'flex items-center justify-between px-4 py-2 backdrop-blur',
           isDark
             ? 'border-b border-slate-800 bg-slate-900/80'
-            : 'border-b border-slate-200 bg-slate-50',
+            : 'border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60',
         )}
       >
         <div className="flex items-center gap-3">
@@ -162,13 +162,13 @@ export function StudentPlayerChrome({
             ✦
           </span>
           <div>
-            <h1 className={cn('text-sm font-semibold', isDark ? '' : 'text-slate-900')}>
+            <h1 className={cn('text-sm font-semibold', isDark ? '' : 'text-slate-900 dark:text-slate-100')}>
               {title}
             </h1>
             <p
               className={cn(
                 'text-[11px]',
-                isDark ? 'text-slate-400' : 'text-slate-500',
+                isDark ? 'text-slate-400 dark:text-slate-500' : 'text-slate-500 dark:text-slate-400',
               )}
             >
               {progressValue > 0 && progressValue < 100
@@ -203,7 +203,7 @@ export function StudentPlayerChrome({
                 'h-10 w-10',
                 isDark
                   ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
               )}
             >
               <Copy className="h-4 w-4" />
@@ -220,7 +220,7 @@ export function StudentPlayerChrome({
                 'h-10 w-10',
                 isDark
                   ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
               )}
             >
               <Eye className="h-4 w-4" />
@@ -237,7 +237,7 @@ export function StudentPlayerChrome({
                 'h-10 w-10',
                 isDark
                   ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
               )}
             >
               {isFullscreen ? (
@@ -258,7 +258,7 @@ export function StudentPlayerChrome({
                 'h-10 w-10',
                 isDark
                   ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
               )}
             >
               <X className="h-4 w-4" />
@@ -269,7 +269,7 @@ export function StudentPlayerChrome({
 
       {/* Progress strip — hidden at 0% and 100% to keep the chrome clean. */}
       <div
-        className={cn('h-0.5', isDark ? 'bg-slate-800' : 'bg-slate-100')}
+        className={cn('h-0.5', isDark ? 'bg-slate-800' : 'bg-slate-100 dark:bg-slate-800')}
         role="progressbar"
         aria-valuenow={progressValue}
         aria-valuemin={0}
@@ -289,7 +289,7 @@ export function StudentPlayerChrome({
       </div>
 
       {/* Body */}
-      <div className={cn('relative flex-1', isDark ? 'bg-white' : 'bg-white')}>
+      <div className={cn('relative flex-1', isDark ? 'bg-white dark:bg-slate-900' : 'bg-white dark:bg-slate-900')}>
         {loading && (
           <LoadingOverlay message={emptyMessage} />
         )}

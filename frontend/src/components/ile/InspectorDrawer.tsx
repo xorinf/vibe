@@ -73,7 +73,7 @@ export const InspectorDrawer = forwardRef<HTMLDivElement, InspectorDrawerProps>(
       <aside
         ref={ref}
         className={cn(
-          'w-[360px] flex min-h-0 shrink-0 flex-col border-l border-slate-200 bg-white animate-in slide-in-from-right-2 duration-200',
+          'w-[360px] flex min-h-0 shrink-0 flex-col border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 animate-in slide-in-from-right-2 duration-200',
           className,
         )}
       >
@@ -157,10 +157,10 @@ function InspectorTabStrip({
             aria-selected={tab === t.id}
             onClick={() => onTabChange(t.id)}
             className={cn(
-              'relative flex items-center gap-1.5 border-r border-slate-200 px-3 text-[11px] font-medium transition-colors',
+              'relative flex items-center gap-1.5 border-r border-slate-200 dark:border-slate-700 px-3 text-[11px] font-medium transition-colors',
               tab === t.id
-                ? 'bg-white text-slate-900'
-                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100'
+                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
             )}
           >
             {tab === t.id && (

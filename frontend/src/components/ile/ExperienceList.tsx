@@ -91,7 +91,7 @@ export function ExperienceList({
   }
 
   return (
-    <div className={cn('flex h-full flex-col bg-slate-50', className)}>
+    <div className={cn('flex h-full flex-col bg-slate-50 dark:bg-slate-900/60', className)}>
       {/* Header — one big "Create new experience" button is the primary
           action. The "Manage every experience you've authored" copy
           makes the purpose explicit. The search is collapsed into a
@@ -230,8 +230,8 @@ function ExperienceCard({
         onClick={onOpen}
         aria-label={`Open ${item.title || 'Untitled Experience'}`}
         className={cn(
-          'group flex w-full flex-col items-stretch rounded-lg border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40',
-          archived ? 'border-slate-200 opacity-75' : 'border-slate-200 hover:border-primary/30',
+          'group flex w-full flex-col items-stretch rounded-lg border bg-white dark:bg-slate-900 p-4 text-left shadow-sm transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40',
+          archived ? 'border-slate-200 dark:border-slate-700 opacity-75' : 'border-slate-200 dark:border-slate-700 hover:border-primary/30',
         )}
       >
         <div className="flex items-start justify-between gap-2">

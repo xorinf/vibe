@@ -164,7 +164,7 @@ export function ChatPane({
   }, [api, isStreaming]);
 
   return (
-    <div className={cn('flex h-full flex-col border-r bg-slate-50/40', className)}>
+    <div className={cn('flex h-full flex-col border-r bg-slate-50/40 dark:bg-slate-900/60', className)}>
       <Header
         state={state}
         api={api}
@@ -224,7 +224,7 @@ export function ChatPane({
                       key={`${msg}-${idx}`}
                       className={cn(
                         'flex items-start gap-2 rounded-md px-2 py-1 text-xs transition-colors',
-                        isLast ? 'bg-emerald-50 text-emerald-900' : 'text-slate-500',
+                        isLast ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-900' : 'text-slate-500 dark:text-slate-400',
                       )}
                     >
                       <span className="mt-0.5 text-emerald-600 dark:text-emerald-400">
@@ -556,8 +556,8 @@ function MessageBubble({
         className={cn(
           'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full',
           isUser
-            ? 'bg-slate-200 text-slate-600'
-            : 'bg-violet-100 text-violet-700',
+            ? 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
+            : 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300',
         )}
       >
         {isUser ? <User className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
@@ -565,7 +565,7 @@ function MessageBubble({
       <div
         className={cn(
           'min-w-0 flex-1 rounded-md px-3 py-2 text-[13px] leading-relaxed',
-          isUser ? 'bg-white ring-1 ring-slate-200' : 'bg-violet-50/60 ring-1 ring-violet-100',
+          isUser ? 'bg-white dark:bg-slate-900 ring-1 ring-slate-200 dark:ring-slate-700' : 'bg-violet-50/60 dark:bg-violet-950/30 ring-1 ring-violet-100 dark:ring-violet-900/40',
         )}
       >
         <p className="break-words text-slate-800 dark:text-slate-200">{message.content}</p>

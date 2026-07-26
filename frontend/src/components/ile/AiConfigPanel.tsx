@@ -390,10 +390,10 @@ export function AiConfigPanel({
         className={cn(
           'inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
           status.kind === 'connected'
-            ? 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+            ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 hover:bg-emerald-100'
             : loading
-              ? 'bg-slate-100 text-slate-600'
-              : 'bg-amber-50 text-amber-800 hover:bg-amber-100',
+              ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+              : 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 hover:bg-amber-100',
           className,
         )}
         aria-label={
@@ -427,8 +427,8 @@ export function AiConfigPanel({
           className={cn(
             'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
             status.kind === 'connected'
-              ? 'bg-white/70 text-emerald-700'
-              : 'bg-white/70 text-amber-700',
+              ? 'bg-white/70 dark:bg-slate-900 text-emerald-700 dark:text-emerald-400'
+              : 'bg-white/70 dark:bg-slate-900 text-amber-700 dark:text-amber-400',
           )}
         >
           {status.kind === 'connected' ? (
@@ -526,7 +526,7 @@ export function AiConfigFormBody({
     return (
       <div
         className={cn(
-          'flex items-center gap-2 py-8 text-sm text-slate-500',
+          'flex items-center gap-2 py-8 text-sm text-slate-500 dark:text-slate-400',
           className,
         )}
       >

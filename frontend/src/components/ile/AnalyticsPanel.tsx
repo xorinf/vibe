@@ -57,7 +57,7 @@ export function AnalyticsPanel({ experienceId, className }: AnalyticsPanelProps)
   }, [experienceId]);
 
   return (
-    <div className={cn('flex h-full flex-col bg-slate-50', className)}>
+    <div className={cn('flex h-full flex-col bg-slate-50 dark:bg-slate-900/60', className)}>
       <div className="flex items-center justify-between border-b bg-white dark:bg-slate-900 px-4 py-3">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -261,7 +261,7 @@ function StudentRow({
                   ? 'bg-emerald-500'
                   : pct > 0
                   ? 'bg-violet-500'
-                  : 'bg-slate-300',
+                  : 'bg-slate-300 dark:bg-slate-600',
               )}
               style={{ width: `${pct}%` }}
             />

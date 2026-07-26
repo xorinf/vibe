@@ -505,7 +505,7 @@ export function TeacherILEWorkspace({
       <header
         className={cn(
           'h-12',
-          'flex shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3',
+          'flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3',
         )}
       >
         <div className="flex min-w-0 items-center gap-2">

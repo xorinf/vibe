@@ -110,7 +110,7 @@ function ToolbarButton({
         'h-7 gap-1 px-2 text-xs whitespace-nowrap',
         active
           ? 'bg-primary/10 text-primary hover:bg-primary/15'
-          : 'text-slate-600 hover:text-slate-900',
+          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900',
         disabled && 'opacity-40',
       )}
     >
@@ -181,8 +181,8 @@ function ViewModeButton({
       className={cn(
         'inline-flex h-7 w-7 items-center justify-center rounded-sm transition-colors',
         active
-          ? 'bg-white text-primary shadow-sm'
-          : 'text-slate-500 hover:text-slate-800',
+          ? 'bg-white dark:bg-slate-900 text-primary shadow-sm'
+          : 'text-slate-500 dark:text-slate-400 hover:text-slate-800',
       )}
       title={target === 'code' ? 'Code only' : target === 'split' ? 'Split view' : 'Preview only'}
       aria-label={target === 'code' ? 'Code only' : target === 'split' ? 'Split view' : 'Preview only'}

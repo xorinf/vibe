@@ -97,7 +97,7 @@ export function HistoryPanel({
   );
 
   return (
-    <div className={cn('flex h-full flex-col bg-white', className)}>
+    <div className={cn('flex h-full flex-col bg-white dark:bg-slate-900', className)}>
       <div className="border-b px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
           <History className="h-3.5 w-3.5 text-primary" />
@@ -158,8 +158,8 @@ function VersionRow({
       className={cn(
         'rounded-md border px-3 py-2 text-sm transition-colors',
         version.isCurrent
-          ? 'border-emerald-200 bg-emerald-50/60'
-          : 'border-slate-200 bg-white hover:border-primary/30',
+          ? 'border-emerald-200 dark:border-emerald-800 bg-emerald-50/60 dark:bg-emerald-950/30'
+          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:border-primary/30',
       )}
     >
       <div className="flex items-start justify-between gap-2">

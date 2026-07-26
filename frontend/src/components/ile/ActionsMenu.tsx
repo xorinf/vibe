@@ -301,12 +301,12 @@ function MenuItem({
         className={cn(
           'flex min-h-10 w-full items-start gap-2 px-3 py-2 text-left text-sm transition-colors',
           'hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50',
-          tone === 'danger' && 'text-rose-700 hover:bg-rose-50/60',
+          tone === 'danger' && 'text-rose-700 dark:text-rose-400 hover:bg-rose-50/60',
         )}
       >
         <span
           className={cn(
-            'mt-0.5 text-slate-400',
+            'mt-0.5 text-slate-400 dark:text-slate-500',
             tone === 'danger' && 'text-rose-500',
           )}
         >

@@ -240,7 +240,7 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
   }, [items]);
 
   return (
-    <div className={cn('flex h-full flex-col bg-slate-50', className)}>
+    <div className={cn('flex h-full flex-col bg-slate-50 dark:bg-slate-900/60', className)}>
       {/* Toolbar */}
       <div className="border-b bg-white dark:bg-slate-900 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
@@ -317,8 +317,8 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
           className={cn(
             'rounded-lg border-2 border-dashed p-6 text-center transition-colors',
             dragOver
-              ? 'border-violet-400 bg-violet-50/60'
-              : 'border-slate-200 bg-white/40',
+              ? 'border-violet-400 bg-violet-50/60 dark:bg-violet-950/30'
+              : 'border-slate-200 dark:border-slate-700 bg-white/40 dark:bg-slate-900',
           )}
         >
           {uploading ? (

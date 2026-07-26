@@ -81,7 +81,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
   }, []);
 
   return (
-    <div className={cn('relative flex h-full flex-col bg-slate-100', className)}>
+    <div className={cn('relative flex h-full flex-col bg-slate-100 dark:bg-slate-800', className)}>
       {/* Toolbar */}
       <div className="flex items-center justify-between border-b bg-white dark:bg-slate-900 px-4 py-2">
         <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-400">

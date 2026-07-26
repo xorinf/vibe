@@ -155,7 +155,7 @@ export function EditorSplitPane({
   const [resizableMounted] = useState(true);
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col bg-slate-50', className)}>
+    <div className={cn('flex h-full min-h-0 flex-col bg-slate-50 dark:bg-slate-900/60', className)}>
       <EditorToolbar
         viewMode={viewMode}
         onViewModeChange={onViewModeChange}
@@ -240,7 +240,7 @@ export function EditorSplitPane({
           {(viewMode === 'code' || viewMode === 'split') && (
             <div
               className={cn(
-                'flex h-full min-h-0 flex-col border-r border-slate-200 bg-white',
+                'flex h-full min-h-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900',
                 viewMode === 'split' ? 'w-1/2' : 'w-full',
               )}
             >

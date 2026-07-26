@@ -86,7 +86,7 @@ export function ActivityBar({
     <aside
       className={cn(
         ACTIVITY_BAR_W,
-        'flex shrink-0 flex-col items-center border-r border-slate-200 bg-slate-50/60',
+        'flex shrink-0 flex-col items-center border-r border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/60',
       )}
     >
       <div className="flex flex-1 flex-col items-stretch py-2">
@@ -129,7 +129,7 @@ function ActivityBarButton({
         'relative mx-1 flex h-10 w-10 items-center justify-center rounded-md transition-colors',
         active
           ? 'bg-primary/10 text-primary'
-          : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900',
+          : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
       )}
     >
       <span
@@ -176,7 +176,7 @@ export const ChatDrawer = forwardRef<ImperativePanelHandle, ChatDrawerProps>(fun
     <aside
       className={cn(
         CHAT_W,
-        'flex min-h-0 shrink-0 flex-col border-r border-slate-200 bg-white animate-in slide-in-from-left-2 duration-200',
+        'flex min-h-0 shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 animate-in slide-in-from-left-2 duration-200',
       )}
     >
       <ChatPane
@@ -289,7 +289,7 @@ function CentreStatusBar({
     <div
       className={cn(
         STATUS_H,
-        'flex shrink-0 items-center gap-3 border-t border-slate-200 bg-white px-3 text-[10px] text-slate-500',
+        'flex shrink-0 items-center gap-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-[10px] text-slate-500 dark:text-slate-400',
       )}
     >
       <span className="inline-flex items-center gap-1">
