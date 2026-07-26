@@ -10,7 +10,9 @@ import { ID } from '#root/shared/interfaces/models.js';
  * Asset kinds the teacher can upload. The shape maps directly to the
  * per-kind upload limit + mimetype allowlist enforced in the validators.
  */
-export type IleAssetKind = 'image' | 'audio' | 'video' | 'pdf' | 'svg';
+export type IleAssetKind = 'image' | 'audio' | 'video' | 'pdf' | 'svg' | 'markdown';
+
+export const ILE_OWNER_DEFAULT_QUOTA_BYTES = 500 * 1024 * 1024;
 
 export const ILE_ASSET_KINDS: IleAssetKind[] = [
   'image',
@@ -27,6 +29,7 @@ export const ILE_ASSET_KIND_LABELS: Record<IleAssetKind, string> = {
   video: 'Video',
   pdf: 'PDF',
   svg: 'SVG',
+  markdown: 'Markdown',
 };
 
 /**
@@ -58,6 +61,10 @@ export const ILE_ASSET_LIMITS: Record<
   svg: {
     mimetypes: ['image/svg+xml'],
     maxBytes: 2 * 1024 * 1024,
+  },
+  markdown: {
+    mimetypes: ['text/markdown', 'text/x-markdown'],
+    maxBytes: 512 * 1024,
   },
 };
 
@@ -91,6 +98,14 @@ export class IleAsset {
   /** Path inside the GCS bucket. Opaque to the client. */
   @Expose()
   storageKey: string;
+
+  sha256?: string;
+  thumbnailKey?: string;
+  meta?: { width?: number; height?: number; encoding?: string };
+  displayName?: string;
+  tags?: string[];
+  favorite?: boolean;
+  deletedAt?: Date;
 
   @Expose()
   createdAt: Date;

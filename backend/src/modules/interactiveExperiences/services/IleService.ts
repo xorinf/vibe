@@ -122,13 +122,19 @@ export class IleService {
    */
   async getPublishedForStudent(
     id: string,
-  ): Promise<Pick<IleExperience, '_id' | 'title' | 'html'> | null> {
+  ): Promise<Pick<IleExperience, '_id' | 'title' | 'html' | 'courseId' | 'courseVersionId'> | null> {
     const doc = await this.repo.findById(id);
     if (!doc) return null;
     // Archived → not playable, even if it was published before.
     if (doc.status === 'archived') return null;
     if (doc.status !== 'published') return null;
-    return { _id: doc._id, title: doc.title, html: doc.html };
+    return {
+      _id: doc._id,
+      title: doc.title,
+      html: doc.html,
+      courseId: doc.courseId,
+      courseVersionId: doc.courseVersionId,
+    };
   }
 
   /**

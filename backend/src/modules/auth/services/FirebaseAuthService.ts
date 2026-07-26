@@ -120,13 +120,19 @@ export class FirebaseAuthService extends BaseService implements IAuthService {
         });
       }
     }
-    // When FIREBASE_AUTH_EMULATOR_HOST is set, route auth() to the local
-    // emulator instead of the real Firebase project. Unblocks
-    // verifyIdToken for tokens issued by the frontend auth emulator.
-    if (appConfig.firebase.authEmulatorHost) {
-      const [host, portStr] = appConfig.firebase.authEmulatorHost.split(':');
-      const port = Number(portStr) || 9099;
-      (admin.auth() as any).useEmulator(host, port);
+    // In firebase-admin v12+, the Auth sub-module reads
+    // `process.env.FIREBASE_AUTH_EMULATOR_HOST` directly to route to
+    // the local emulator. The `auth.useEmulator(host, port)` runtime
+    // method that older code relied on is no longer part of the public
+    // admin API — the env var is the only contract. We make sure
+    // process.env is populated if `appConfig.firebase.authEmulatorHost`
+    // is set (e.g. from a non-dotenv loader).
+    if (
+      appConfig.firebase.authEmulatorHost &&
+      !process.env.FIREBASE_AUTH_EMULATOR_HOST
+    ) {
+      process.env.FIREBASE_AUTH_EMULATOR_HOST =
+        appConfig.firebase.authEmulatorHost;
     }
 
     this.auth = admin.auth();

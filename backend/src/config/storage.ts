@@ -6,6 +6,7 @@ export const storageConfig = {
     anomalyBucketName: env('GOOGLE_ANOMALY_BUCKET') || 'vibe-anomaly-data',
     facesBucketName: env('GOOGLE_FACES_BUCKET') || 'vibe-faces-data',
     aiServerBucketName: env('GOOGLE_AI_SERVER_BUCKET') || 'vibe-aiserver-data',
+    ileAssetsBucketName: env('GOOGLE_ILE_ASSETS_BUCKET') || 'vibe-ile-assets',
   },
   encryption: {
     mediaEncryptionKey: env('MEDIA_ENCRYPTION_KEY'),

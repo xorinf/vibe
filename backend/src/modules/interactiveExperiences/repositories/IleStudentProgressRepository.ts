@@ -179,6 +179,17 @@ export class IleStudentProgressRepository {
     return col.find({ experienceId }).sort({ lastEventAt: -1 }).toArray();
   }
 
+  async listForExperienceSince(
+    experienceId: string,
+    since: Date,
+  ): Promise<IleStudentProgress[]> {
+    const col = await this.col();
+    return col
+      .find({ experienceId, lastEventAt: { $gte: since } })
+      .sort({ lastEventAt: -1 })
+      .toArray();
+  }
+
   async listForOwner(
     experienceIds: string[],
   ): Promise<IleStudentProgress[]> {

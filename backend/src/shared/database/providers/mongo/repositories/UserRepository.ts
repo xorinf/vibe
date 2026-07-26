@@ -25,14 +25,22 @@ if (!admin.apps.length) {
     });
   }
 }
-  // When FIREBASE_AUTH_EMULATOR_HOST is set, route auth() to the local
-  // emulator instead of the real Firebase project. Unblocks
-  // verifyIdToken for tokens issued by the frontend auth emulator.
-  if (appConfig.firebase.authEmulatorHost) {
-    const [host, portStr] = appConfig.firebase.authEmulatorHost.split(':');
-    const port = Number(portStr) || 9099;
-    (admin.auth() as any).useEmulator(host, port);
+// In firebase-admin v12+, the Auth sub-module reads
+// `process.env.FIREBASE_AUTH_EMULATOR_HOST` directly to decide whether
+// to route to the local emulator (see `auth-api-request.js`:
+// `emulatorHost() = process.env.FIREBASE_AUTH_EMULATOR_HOST`).
+// The legacy `auth.useEmulator(host, port)` method that older code
+// patches relied on was removed from the public admin API in v12 — the
+// SDK no longer exposes it. We surface the parsed value here only for
+// a startup sanity check; the actual routing is driven by the env var
+// that the existing `backend/.env` already exports.
+if (appConfig.firebase.authEmulatorHost) {
+  if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) {
+    // Should never happen — `appConfig.firebase.authEmulatorHost` is
+    // populated FROM this same env var. Defensive only.
+    process.env.FIREBASE_AUTH_EMULATOR_HOST = appConfig.firebase.authEmulatorHost;
   }
+}
 
 @injectable()
 export class UserRepository implements IUserRepository {

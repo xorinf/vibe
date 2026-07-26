@@ -96,4 +96,16 @@ export class IleAssetStorageService {
       );
     }
   }
+
+  async download(storageKey: string): Promise<Buffer> {
+    const bucket = this.googleStorage.bucket(this.bucketName);
+    try {
+      const [buffer] = await bucket.file(storageKey).download();
+      return buffer;
+    } catch (err: any) {
+      throw new InternalServerError(
+        `Failed to download asset: ${err?.message ?? String(err)}`,
+      );
+    }
+  }
 }
