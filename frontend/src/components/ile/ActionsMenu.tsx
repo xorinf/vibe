@@ -166,7 +166,7 @@ export function ActionsMenu({
         onClick={() => setOpen((v) => !v)}
         disabled={isBusy}
         aria-label="Experience actions"
-        className="h-10 gap-1 px-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900"
+        className="h-10 gap-1 px-2 text-xs text-muted-foreground  hover:text-slate-900"
       >
         {isBusy ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -177,11 +177,11 @@ export function ActionsMenu({
       </Button>
 
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg">
+        <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-border  bg-background  shadow-lg">
           {/* Inline rename */}
           {renaming ? (
             <div className="space-y-2 p-3">
-              <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
+              <label className="text-[11px] font-medium text-muted-foreground ">
                 Rename experience
               </label>
               <input
@@ -198,7 +198,7 @@ export function ActionsMenu({
                     setNewTitle(currentTitle);
                   }
                 }}
-                className="w-full rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full rounded-md border border-border/80  px-2 py-1.5 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
               <div className="flex items-center justify-end gap-2">
                 <Button
@@ -301,12 +301,12 @@ function MenuItem({
         className={cn(
           'flex min-h-10 w-full items-start gap-2 px-3 py-2 text-left text-sm transition-colors',
           'hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50',
-          tone === 'danger' && 'text-rose-700 dark:text-rose-400 hover:bg-rose-50/60',
+          tone === 'danger' && 'text-destructive  hover:bg-rose-50/60',
         )}
       >
         <span
           className={cn(
-            'mt-0.5 text-slate-400 dark:text-slate-500',
+            'mt-0.5 text-muted-foreground/80 ',
             tone === 'danger' && 'text-rose-500',
           )}
         >
@@ -315,7 +315,7 @@ function MenuItem({
         <span className="flex-1">
           <span className="block text-[13px] font-medium">{label}</span>
           {hint && (
-            <span className="block text-[11px] text-slate-500 dark:text-slate-400">{hint}</span>
+            <span className="block text-[11px] text-muted-foreground ">{hint}</span>
           )}
         </span>
       </button>

@@ -57,14 +57,14 @@ export function AnalyticsPanel({ experienceId, className }: AnalyticsPanelProps)
   }, [experienceId]);
 
   return (
-    <div className={cn('flex h-full flex-col bg-slate-50 dark:bg-slate-900/60', className)}>
-      <div className="flex items-center justify-between border-b bg-white dark:bg-slate-900 px-4 py-3">
+    <div className={cn('flex h-full flex-col bg-card ', className)}>
+      <div className="flex items-center justify-between border-b bg-background  px-4 py-3">
         <div>
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
-            <BarChart3 className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground ">
+            <BarChart3 className="h-4 w-4 text-primary/90 " />
             Student analytics
           </h2>
-          <p className="text-xs text-slate-500 dark:text-slate-400">
+          <p className="text-xs text-muted-foreground ">
             Aggregated, anonymised engagement for this experience.
           </p>
         </div>
@@ -82,17 +82,17 @@ export function AnalyticsPanel({ experienceId, className }: AnalyticsPanelProps)
 
       <div className="flex-1 overflow-y-auto p-3">
         {loading && !data ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex items-center justify-center gap-2 py-10 text-xs text-muted-foreground ">
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
           </div>
         ) : error ? (
-          <div className="rounded-md border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-xs text-rose-700 dark:text-rose-400">
+          <div className="rounded-md border border-destructive/30  bg-destructive/15  px-3 py-2 text-xs text-destructive ">
             {error}
             <Button
               size="sm"
               variant="ghost"
               onClick={refresh}
-              className="ml-2 h-6 text-rose-700 dark:text-rose-400 hover:bg-rose-100"
+              className="ml-2 h-6 text-destructive  hover:bg-rose-100"
             >
               Retry
             </Button>
@@ -175,11 +175,11 @@ function AnalyticsContent({ data }: { data: ExperienceAnalytics }) {
       <CompletionTimeline students={data.students} />
 
       <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground ">
           Students ({data.students.length})
         </h3>
         {data.students.length === 0 ? (
-          <p className="rounded-md border border-dashed border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-center text-xs text-slate-500 dark:text-slate-400">
+          <p className="rounded-md border border-dashed border-border  bg-background  p-3 text-center text-xs text-muted-foreground ">
             No students have opened this experience yet.
           </p>
         ) : (
@@ -236,24 +236,24 @@ function StudentRow({
   const pct = Math.max(0, Math.min(100, student.lastProgressPct));
 
   return (
-    <li className="rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+    <li className="rounded-md border border-border  bg-background ">
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
       >
         <div className="min-w-0 flex-1">
-          <p className="truncate font-mono text-[10px] text-slate-500 dark:text-slate-400">
+          <p className="truncate font-mono text-[10px] text-muted-foreground ">
             {student.studentHash.slice(0, 8)}…
           </p>
-          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-slate-600 dark:text-slate-400">
+          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground ">
             <span>
               Started {startedAt.toLocaleDateString()} {startedAt.toLocaleTimeString()}
             </span>
             <span className="text-slate-300">·</span>
             <span>last {timeAgo(lastAt)}</span>
           </div>
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted ">
             <div
               className={cn(
                 'h-full rounded-full',
@@ -261,28 +261,28 @@ function StudentRow({
                   ? 'bg-emerald-500'
                   : pct > 0
                   ? 'bg-violet-500'
-                  : 'bg-slate-300 dark:bg-slate-600',
+                  : 'bg-muted ',
               )}
               style={{ width: `${pct}%` }}
             />
           </div>
         </div>
-        <div className="flex shrink-0 flex-col items-end text-[10px] text-slate-500 dark:text-slate-400">
-          <span className="font-semibold text-slate-700 dark:text-slate-300">{pct}%</span>
+        <div className="flex shrink-0 flex-col items-end text-[10px] text-muted-foreground ">
+          <span className="font-semibold text-foreground/80 ">{pct}%</span>
           {student.errorCount > 0 && (
-            <span className="text-rose-600 dark:text-rose-400">{student.errorCount} err</span>
+            <span className="text-destructive/90 ">{student.errorCount} err</span>
           )}
           {student.interactionCount > 0 && (
-            <span className="text-slate-500 dark:text-slate-400">{student.interactionCount} act</span>
+            <span className="text-muted-foreground ">{student.interactionCount} act</span>
           )}
         </div>
       </button>
       {expanded && student.events.length > 0 && (
-        <div className="border-t bg-slate-50 dark:bg-slate-900/60 px-3 py-2">
+        <div className="border-t bg-card  px-3 py-2">
           {student.resumePoint && (
-            <p className="mb-1.5 flex items-center gap-1.5 text-[10px] text-slate-600 dark:text-slate-400">
+            <p className="mb-1.5 flex items-center gap-1.5 text-[10px] text-muted-foreground ">
               <RotateCw className="h-2.5 w-2.5 text-violet-500" />
-              <span className="font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              <span className="font-semibold uppercase tracking-wider text-muted-foreground ">
                 Resume point
               </span>
               <span className="font-mono">
@@ -291,26 +291,26 @@ function StudentRow({
                   : 'no progress yet'}
               </span>
               {student.resumePoint.label && (
-                <span className="truncate text-slate-500 dark:text-slate-400">
+                <span className="truncate text-muted-foreground ">
                   · "{student.resumePoint.label}"
                 </span>
               )}
-              <span className="text-slate-400 dark:text-slate-500">
+              <span className="text-muted-foreground/80 ">
                 · at {new Date(student.resumePoint.at).toLocaleTimeString()}
               </span>
             </p>
           )}
-          <ol className="space-y-1 text-[10px] font-mono text-slate-600 dark:text-slate-400">
+          <ol className="space-y-1 text-[10px] font-mono text-muted-foreground ">
             {student.events.slice(-12).map((e, idx) => (
               <li key={idx} className="flex items-start gap-1.5">
-                <span className="mt-0.5 text-slate-400 dark:text-slate-500">
+                <span className="mt-0.5 text-muted-foreground/80 ">
                   {new Date(e.receivedAt).toLocaleTimeString()}
                 </span>
-                <span className="rounded bg-slate-200 dark:bg-slate-700 px-1 text-[9px] uppercase text-slate-700 dark:text-slate-300">
+                <span className="rounded bg-muted  px-1 text-[9px] uppercase text-foreground/80 ">
                   {e.kind}
                 </span>
                 {e.data != null && (
-                  <span className="truncate text-slate-500 dark:text-slate-400">
+                  <span className="truncate text-muted-foreground ">
                     {JSON.stringify(e.data)}
                   </span>
                 )}
@@ -347,10 +347,10 @@ function CompletionTimeline({
   if (students.length === 0) {
     return (
       <section>
-        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+        <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground ">
           Completion timeline
         </h3>
-        <p className="rounded-md border border-dashed border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-3 text-center text-xs text-slate-500 dark:text-slate-400">
+        <p className="rounded-md border border-dashed border-border  bg-background  p-3 text-center text-xs text-muted-foreground ">
           No student activity yet.
         </p>
       </section>
@@ -371,12 +371,12 @@ function CompletionTimeline({
 
   return (
     <section>
-      <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+      <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground ">
         <CalendarClock className="h-3 w-3" />
         Completion timeline
       </h3>
-      <div className="overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
-        <div className="flex h-2 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
+      <div className="overflow-hidden rounded-md border border-border  bg-background ">
+        <div className="flex h-2 w-full overflow-hidden bg-muted ">
           {buckets.map((b) =>
             b.count > 0 ? (
               <div
@@ -397,10 +397,10 @@ function CompletionTimeline({
               <span className={cn('text-[10px] font-semibold uppercase tracking-wider', b.tone)}>
                 {b.label}
               </span>
-              <span className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              <span className="text-base font-semibold text-foreground ">
                 {b.count}
               </span>
-              <span className="text-[10px] text-slate-500 dark:text-slate-400">
+              <span className="text-[10px] text-muted-foreground ">
                 {Math.round((b.count / total) * 100)}%
               </span>
             </li>

@@ -86,7 +86,7 @@ export function ActivityBar({
     <aside
       className={cn(
         ACTIVITY_BAR_W,
-        'flex shrink-0 flex-col items-center border-r border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/60',
+        'flex shrink-0 flex-col items-center border-r border-border  bg-card ',
       )}
     >
       <div className="flex flex-1 flex-col items-stretch py-2">
@@ -129,7 +129,7 @@ function ActivityBarButton({
         'relative mx-1 flex h-10 w-10 items-center justify-center rounded-md transition-colors',
         active
           ? 'bg-primary/10 text-primary'
-          : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
+          : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
       )}
     >
       <span
@@ -176,7 +176,7 @@ export const ChatDrawer = forwardRef<ImperativePanelHandle, ChatDrawerProps>(fun
     <aside
       className={cn(
         CHAT_W,
-        'flex min-h-0 shrink-0 flex-col border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 animate-in slide-in-from-left-2 duration-200',
+        'flex min-h-0 shrink-0 flex-col border-r border-border  bg-background  animate-in slide-in-from-left-2 duration-200',
       )}
     >
       <ChatPane
@@ -222,7 +222,7 @@ export interface CentreCanvasProps {
 export function CentreCanvas(props: CentreCanvasProps) {
   const { viewMode, streamState, experienceId } = props;
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-slate-50 dark:bg-slate-900/60">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-card ">
       <div className="flex min-h-0 flex-1 flex-col">
         {viewMode === 'preview' && (
           <EditorDockStrip
@@ -289,7 +289,7 @@ function CentreStatusBar({
     <div
       className={cn(
         STATUS_H,
-        'flex shrink-0 items-center gap-3 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-[10px] text-slate-500 dark:text-slate-400',
+        'flex shrink-0 items-center gap-3 border-t border-border  bg-background  px-3 text-[10px] text-muted-foreground ',
       )}
     >
       <span className="inline-flex items-center gap-1">
@@ -304,7 +304,7 @@ function CentreStatusBar({
           {isError ? 'Error' : isStreaming ? 'Streaming' : 'Ready'}
         </span>
       </span>
-      <span aria-hidden="true" className="h-3 w-px bg-slate-200 dark:bg-slate-700" />
+      <span aria-hidden="true" className="h-3 w-px bg-muted " />
       <span>{charCount.toLocaleString()} chars</span>
       <div className="flex-1" />
       <span className="inline-flex items-center gap-1">
@@ -338,11 +338,11 @@ function EditorDockStrip({
   return (
     <div
       style={{ height: '40px' }}
-      className="flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 px-3 text-[11px] text-slate-600 dark:text-slate-400"
+      className="flex shrink-0 items-center gap-2 border-b border-border  bg-card  px-3 text-[11px] text-muted-foreground "
     >
-      <Code2 className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+      <Code2 className="h-3.5 w-3.5 text-muted-foreground/80 " />
       <span className="font-medium">Editor</span>
-      <span className="text-slate-400 dark:text-slate-500">Hidden</span>
+      <span className="text-muted-foreground/80 ">Hidden</span>
       <div className="flex-1" />
       <Button
         size="sm"

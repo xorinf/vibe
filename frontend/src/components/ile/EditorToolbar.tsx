@@ -39,7 +39,7 @@ export function EditorToolbar({
   isEditorReady,
 }: EditorToolbarProps) {
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 [&>*]:shrink-0">
+    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-border  bg-background  px-2 [&>*]:shrink-0">
       <ViewModeSwitch value={viewMode} onChange={onViewModeChange} />
 
       <Divider />
@@ -75,7 +75,7 @@ export function EditorToolbar({
 function Divider() {
   return (
     <span
-      className="mx-0.5 h-5 w-px shrink-0 bg-slate-200 dark:bg-slate-700"
+      className="mx-0.5 h-5 w-px shrink-0 bg-muted "
       aria-hidden="true"
     />
   );
@@ -110,14 +110,14 @@ function ToolbarButton({
         'h-7 gap-1 px-2 text-xs whitespace-nowrap',
         active
           ? 'bg-primary/10 text-primary hover:bg-primary/15'
-          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900',
+          : 'text-muted-foreground  hover:text-slate-900',
         disabled && 'opacity-40',
       )}
     >
       {icon}
       <span className="hidden xl:inline">{label}</span>
       {shortcut && (
-        <span className="hidden 2xl:inline text-[10px] text-slate-400 dark:text-slate-500">
+        <span className="hidden 2xl:inline text-[10px] text-muted-foreground/80 ">
           {shortcut}
         </span>
       )}
@@ -134,7 +134,7 @@ function ViewModeSwitch({
 }) {
   return (
     <div
-      className="inline-flex shrink-0 items-center rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 p-0.5"
+      className="inline-flex shrink-0 items-center rounded-md border border-border  bg-card  p-0.5"
       role="radiogroup"
       aria-label="View mode"
     >
@@ -181,8 +181,8 @@ function ViewModeButton({
       className={cn(
         'inline-flex h-7 w-7 items-center justify-center rounded-sm transition-colors',
         active
-          ? 'bg-white dark:bg-slate-900 text-primary shadow-sm'
-          : 'text-slate-500 dark:text-slate-400 hover:text-slate-800',
+          ? 'bg-background  text-primary shadow-sm'
+          : 'text-muted-foreground  hover:text-slate-800',
       )}
       title={target === 'code' ? 'Code only' : target === 'split' ? 'Split view' : 'Preview only'}
       aria-label={target === 'code' ? 'Code only' : target === 'split' ? 'Split view' : 'Preview only'}

@@ -164,7 +164,7 @@ export function ChatPane({
   }, [api, isStreaming]);
 
   return (
-    <div className={cn('flex h-full flex-col border-r bg-slate-50/40 dark:bg-slate-900/60', className)}>
+    <div className={cn('flex h-full flex-col border-r bg-card ', className)}>
       <Header
         state={state}
         api={api}
@@ -182,7 +182,7 @@ export function ChatPane({
         )}
 
         {showReasoning && (
-          <div className="mb-3 inline-flex items-center gap-2 rounded-md bg-violet-50 dark:bg-violet-950/30 px-2.5 py-1.5 text-xs text-violet-800 dark:text-violet-300 ring-1 ring-violet-100 dark:ring-violet-900/40">
+          <div className="mb-3 inline-flex items-center gap-2 rounded-md bg-ai/30  px-2.5 py-1.5 text-xs text-primary  ring-1 ring-primary/30 ">
             <Brain className="h-3.5 w-3.5 animate-pulse" />
             Thinking about the next change…
           </div>
@@ -224,10 +224,10 @@ export function ChatPane({
                       key={`${msg}-${idx}`}
                       className={cn(
                         'flex items-start gap-2 rounded-md px-2 py-1 text-xs transition-colors',
-                        isLast ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-900' : 'text-slate-500 dark:text-slate-400',
+                        isLast ? 'bg-primary/15  text-emerald-900' : 'text-muted-foreground ',
                       )}
                     >
-                      <span className="mt-0.5 text-emerald-600 dark:text-emerald-400">
+                      <span className="mt-0.5 text-primary/90 ">
                         {isLast && !state.stream.reasoning ? (
                           <Loader2 className="h-3 w-3 animate-spin" />
                         ) : (
@@ -246,7 +246,7 @@ export function ChatPane({
         <StreamFooter state={state} />
 
         {state.stream.status === 'error' && state.stream.error && (
-          <div className="mt-3 rounded-md border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-xs text-rose-700 dark:text-rose-400">
+          <div className="mt-3 rounded-md border border-destructive/30  bg-destructive/15  px-3 py-2 text-xs text-destructive ">
             <p className="font-medium">
               {state.stream.experienceId ? 'Edit failed' : 'Generation failed'}
             </p>
@@ -257,8 +257,8 @@ export function ChatPane({
 
       {/* Quick actions — only when not currently editing. */}
       {hasExperience && !isStreaming && activeFollowup === null && (
-        <div className="border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2">
-          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-slate-400 dark:text-slate-500">
+        <div className="border-t border-border  bg-background  px-3 py-2">
+          <div className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80 ">
             Quick actions
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -269,7 +269,7 @@ export function ChatPane({
                   key={action.id}
                   type="button"
                   onClick={() => handleQuickAction(action.id)}
-                  className="inline-flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2.5 py-1 text-[11px] font-medium text-slate-700 dark:text-slate-300 transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
+                  className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2.5 py-1 text-[11px] font-medium text-foreground/80  transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
                 >
                   <Icon className="h-3 w-3" />
                   {action.label}
@@ -296,10 +296,10 @@ export function ChatPane({
 
       {/* Composer */}
       {composerHidden ? (
-        <div className="border-t bg-white dark:bg-slate-900 p-4">
-          <div className="rounded-md border border-dashed border-violet-200 dark:border-violet-800 bg-violet-50/40 dark:bg-violet-950/30 px-3 py-2.5 text-xs text-violet-800 dark:text-violet-300">
+        <div className="border-t bg-background  p-4">
+          <div className="rounded-md border border-dashed border-primary/30  bg-ai/30  px-3 py-2.5 text-xs text-primary ">
             <p className="font-medium">Configure an AI provider to start.</p>
-            {configHint && <p className="mt-1 text-violet-700 dark:text-violet-300">{configHint}</p>}
+            {configHint && <p className="mt-1 text-primary ">{configHint}</p>}
           </div>
         </div>
       ) : (
@@ -310,7 +310,7 @@ export function ChatPane({
               onRemove={api.detachAsset}
             />
           )}
-          <div className="border-t bg-white dark:bg-slate-900 p-3">
+          <div className="border-t bg-background  p-3">
             <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -337,7 +337,7 @@ export function ChatPane({
             }}
           />
           <div className="mt-2 flex items-center justify-between">
-            <span className="text-[11px] text-slate-400 dark:text-slate-500">
+            <span className="text-[11px] text-muted-foreground/80 ">
               {hasExperience
                 ? state.pending
                   ? 'Queued — current edit will finish first'
@@ -357,7 +357,7 @@ export function ChatPane({
                   size="sm"
                   variant="outline"
                   onClick={api.cancel}
-                  className="gap-1 text-rose-600 dark:text-rose-400 hover:bg-rose-50 hover:text-rose-700"
+                  className="gap-1 text-destructive/90  hover:bg-rose-50 hover:text-rose-700"
                 >
                   <Square className="h-3.5 w-3.5" />
                   Cancel
@@ -405,8 +405,8 @@ function Header({
   return (
     <div className="flex items-center justify-between border-b px-4 py-2">
       <div>
-        <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Designer</h2>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+        <h2 className="text-sm font-semibold text-foreground ">Designer</h2>
+        <p className="text-[11px] text-muted-foreground ">
           {hasExperience ? 'Iterate by chat or quick action' : 'Describe the lesson to start'}
         </p>
       </div>
@@ -420,7 +420,7 @@ function Header({
               disabled={!api.canUndo || isStreaming}
               aria-label="Undo last edit"
               title="Undo last edit"
-              className="h-7 w-7 p-0 text-slate-500 dark:text-slate-400 hover:text-slate-900 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-muted-foreground  hover:text-slate-900 disabled:opacity-40"
             >
               <Undo2 className="h-3.5 w-3.5" />
             </Button>
@@ -431,11 +431,11 @@ function Header({
               disabled={!api.canRedo || isStreaming}
               aria-label="Redo"
               title="Redo"
-              className="h-7 w-7 p-0 text-slate-500 dark:text-slate-400 hover:text-slate-900 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-muted-foreground  hover:text-slate-900 disabled:opacity-40"
             >
               <Redo2 className="h-3.5 w-3.5" />
             </Button>
-            <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
+            <span className="mx-1 h-5 w-px bg-muted " />
             <Button
               size="sm"
               variant="ghost"
@@ -443,7 +443,7 @@ function Header({
               disabled={isStreaming}
               aria-label="Retry last prompt"
               title="Resend the most recent user prompt"
-              className="h-7 w-7 p-0 text-slate-500 dark:text-slate-400 hover:text-slate-900 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-muted-foreground  hover:text-slate-900 disabled:opacity-40"
             >
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
@@ -454,7 +454,7 @@ function Header({
               disabled={isStreaming || state.stream.status !== 'done'}
               aria-label="Accept latest version"
               title="Mark the latest version as the new baseline"
-              className="h-7 w-7 p-0 text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-primary/90  hover:text-emerald-800 disabled:opacity-40"
             >
               <Check className="h-3.5 w-3.5" />
             </Button>
@@ -465,11 +465,11 @@ function Header({
               disabled={isStreaming}
               aria-label="Reject latest version"
               title="Revert to the previous version"
-              className="h-7 w-7 p-0 text-rose-600 dark:text-rose-400 hover:text-rose-800 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-destructive/90  hover:text-rose-800 disabled:opacity-40"
             >
               <X className="h-3.5 w-3.5" />
             </Button>
-            <span className="mx-1 h-5 w-px bg-slate-200 dark:bg-slate-700" />
+            <span className="mx-1 h-5 w-px bg-muted " />
             <EditingBadge state={state} />
           </>
         )}
@@ -481,7 +481,7 @@ function Header({
 function EditingBadge({ state }: { state: IleEditorState }) {
   if (state.stream.status === 'error') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 dark:bg-rose-900/40 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:text-rose-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-destructive/25  px-2 py-0.5 text-[10px] font-medium text-destructive ">
         <AlertCircle className="h-3 w-3" />
         Error
       </span>
@@ -489,7 +489,7 @@ function EditingBadge({ state }: { state: IleEditorState }) {
   }
   if (state.stream.status === 'streaming') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 dark:bg-violet-900/40 px-2 py-0.5 text-[10px] font-medium text-violet-700 dark:text-violet-300">
+      <span className="inline-flex items-center gap-1 rounded-full bg-ai/40  px-2 py-0.5 text-[10px] font-medium text-primary ">
         <Loader2 className="h-3 w-3 animate-spin" />
         {state.stream.reasoning ? 'Thinking' : 'Editing'}
       </span>
@@ -499,7 +499,7 @@ function EditingBadge({ state }: { state: IleEditorState }) {
     if (state.stream.truncated) {
       return (
         <span
-          className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-[10px] font-medium text-amber-800"
+          className="inline-flex items-center gap-1 rounded-full bg-ai/40  px-2 py-0.5 text-[10px] font-medium text-amber-800"
           title="The provider truncated this response at max_tokens. Try a shorter or more specific prompt."
         >
           <AlertCircle className="h-3 w-3" />
@@ -508,7 +508,7 @@ function EditingBadge({ state }: { state: IleEditorState }) {
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary/25  px-2 py-0.5 text-[10px] font-medium text-primary ">
         <CheckCircle2 className="h-3 w-3" />
         Applied
       </span>
@@ -519,9 +519,9 @@ function EditingBadge({ state }: { state: IleEditorState }) {
 
 function EmptyState({ hasExperience }: { hasExperience: boolean }) {
   return (
-    <div className="flex h-full items-center justify-center text-center text-sm text-slate-400 dark:text-slate-500">
+    <div className="flex h-full items-center justify-center text-center text-sm text-muted-foreground/80 ">
       <div className="max-w-[280px] space-y-3">
-        <p className="text-base text-slate-600 dark:text-slate-400">
+        <p className="text-base text-muted-foreground ">
           {hasExperience
             ? 'Refine the experience in plain language.'
             : 'What should students experience?'}
@@ -556,8 +556,8 @@ function MessageBubble({
         className={cn(
           'mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full',
           isUser
-            ? 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400'
-            : 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300',
+            ? 'bg-muted  text-muted-foreground '
+            : 'bg-ai/40  text-primary ',
         )}
       >
         {isUser ? <User className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />}
@@ -565,12 +565,12 @@ function MessageBubble({
       <div
         className={cn(
           'min-w-0 flex-1 rounded-md px-3 py-2 text-[13px] leading-relaxed',
-          isUser ? 'bg-white dark:bg-slate-900 ring-1 ring-slate-200 dark:ring-slate-700' : 'bg-violet-50/60 dark:bg-violet-950/30 ring-1 ring-violet-100 dark:ring-violet-900/40',
+          isUser ? 'bg-background  ring-1 ring-ring ' : 'bg-ai/30  ring-1 ring-primary/30 ',
         )}
       >
-        <p className="break-words text-slate-800 dark:text-slate-200">{message.content}</p>
+        <p className="break-words text-foreground/90 ">{message.content}</p>
         {message.html && message.role === 'assistant' && !message.inFlight && (
-          <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+          <p className="mt-1 text-[10px] text-muted-foreground ">
             {formatKb(message.html.length)} HTML applied
           </p>
         )}
@@ -580,7 +580,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={onAccept}
-                className="inline-flex items-center gap-1 rounded-full border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400 transition-colors hover:bg-emerald-100"
+                className="inline-flex items-center gap-1 rounded-full border border-primary/30  bg-primary/15  px-2 py-0.5 text-[10px] font-medium text-primary  transition-colors hover:bg-emerald-100"
                 title="Mark this version as the new baseline"
               >
                 <Check className="h-2.5 w-2.5" /> Accept
@@ -590,7 +590,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={onReject}
-                className="inline-flex items-center gap-1 rounded-full border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-2 py-0.5 text-[10px] font-medium text-rose-700 dark:text-rose-400 transition-colors hover:bg-rose-100"
+                className="inline-flex items-center gap-1 rounded-full border border-destructive/30  bg-destructive/15  px-2 py-0.5 text-[10px] font-medium text-destructive  transition-colors hover:bg-rose-100"
                 title="Revert to the previous version"
               >
                 <X className="h-2.5 w-2.5" /> Reject
@@ -600,7 +600,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={onRetry}
-                className="inline-flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-300 transition-colors hover:bg-slate-50"
+                className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2 py-0.5 text-[10px] font-medium text-foreground/80  transition-colors hover:bg-slate-50"
                 title="Re-send the most recent user prompt"
               >
                 <RotateCcw className="h-2.5 w-2.5" /> Retry
@@ -610,7 +610,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={onFork}
-                className="inline-flex items-center gap-1 rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:text-slate-300 transition-colors hover:bg-slate-50"
+                className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2 py-0.5 text-[10px] font-medium text-foreground/80  transition-colors hover:bg-slate-50"
                 title="Start a new branch from this point"
               >
                 <GitFork className="h-2.5 w-2.5" /> Fork
@@ -619,7 +619,7 @@ function MessageBubble({
           </div>
         )}
         {message.inFlight && (
-          <p className="mt-1 flex items-center gap-1 text-[10px] text-violet-600 dark:text-violet-400">
+          <p className="mt-1 flex items-center gap-1 text-[10px] text-primary/90 ">
             <Loader2 className="h-3 w-3 animate-spin" /> streaming…
           </p>
         )}
@@ -642,8 +642,8 @@ function FollowupPrompt({
   onCancel: () => void;
 }) {
   return (
-    <div className="border-t border-slate-200 dark:border-slate-700 bg-violet-50/40 dark:bg-violet-950/30 px-3 py-2">
-      <label className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-violet-800 dark:text-violet-300">
+    <div className="border-t border-border  bg-ai/30  px-3 py-2">
+      <label className="mb-1 flex items-center gap-1.5 text-[11px] font-medium text-primary ">
         <Languages className="h-3 w-3" />
         {prompt.label}
       </label>
@@ -660,7 +660,7 @@ function FollowupPrompt({
             if (e.key === 'Escape') onCancel();
           }}
           placeholder={prompt.placeholder}
-          className="flex-1 rounded-md border border-violet-200 dark:border-violet-800 bg-white dark:bg-slate-900 px-2 py-1 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
+          className="flex-1 rounded-md border border-primary/30  bg-background  px-2 py-1 text-sm focus:border-violet-400 focus:outline-none focus:ring-2 focus:ring-violet-100"
         />
         <Button size="sm" variant="ghost" onClick={onCancel} className="h-7 text-xs">
           Cancel
@@ -702,16 +702,16 @@ function StreamFooter({ state }: { state: IleEditorState }) {
   const model = s.model;
   if (tokens == null && latency == null && !provider && !model) return null;
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-slate-100 dark:border-slate-800 px-1 pt-2 text-[10px] text-slate-500 dark:text-slate-400">
+    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/50  px-1 pt-2 text-[10px] text-muted-foreground ">
       {provider && (
         <span className="inline-flex items-center gap-1">
-          <span className="rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
+          <span className="rounded bg-muted  px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground ">
             {provider}
           </span>
         </span>
       )}
       {model && (
-        <span className="inline-flex items-center gap-1 truncate font-mono text-[10px] text-slate-700 dark:text-slate-300" title={model}>
+        <span className="inline-flex items-center gap-1 truncate font-mono text-[10px] text-foreground/80 " title={model}>
           {model}
         </span>
       )}

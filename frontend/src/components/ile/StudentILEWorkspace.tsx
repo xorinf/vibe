@@ -118,7 +118,7 @@ export function StudentILEWorkspace() {
             <h1 className="text-sm font-semibold">
               {payload?.title ?? 'Interactive Experience'}
             </h1>
-            <p className="text-[11px] text-slate-400 dark:text-slate-500">Interactive learning experience</p>
+            <p className="text-[11px] text-muted-foreground/80 ">Interactive learning experience</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -169,7 +169,7 @@ export function StudentILEWorkspace() {
       </header>
 
       {/* Body */}
-      <div className="relative flex-1 bg-white dark:bg-slate-900">
+      <div className="relative flex-1 bg-background ">
         {loading && <LoadingState onCancel={handleExit} />}
         {error && <ErrorState message={error} onBack={handleExit} />}
         {payload && (
@@ -212,12 +212,12 @@ export function StudentILEWorkspace() {
 
 function LoadingState({ onCancel }: { onCancel: () => void }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-white dark:bg-slate-900 text-sm text-slate-500 dark:text-slate-400">
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background  text-sm text-muted-foreground ">
       <div className="flex items-center gap-2">
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
         Loading experience…
       </div>
-      <Button size="sm" variant="ghost" onClick={onCancel} className="text-slate-400 dark:text-slate-500">
+      <Button size="sm" variant="ghost" onClick={onCancel} className="text-muted-foreground/80 ">
         Cancel
       </Button>
     </div>
@@ -226,13 +226,13 @@ function LoadingState({ onCancel }: { onCancel: () => void }) {
 
 function ErrorState({ message, onBack }: { message: string; onBack: () => void }) {
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-white dark:bg-slate-900 px-6 text-center">
+    <div className="absolute inset-0 flex items-center justify-center bg-background  px-6 text-center">
       <div className="max-w-md space-y-3">
         <AlertTriangle className="mx-auto h-8 w-8 text-rose-400" />
-        <p className="text-base font-medium text-slate-900 dark:text-slate-100">
+        <p className="text-base font-medium text-foreground ">
           Couldn't load this experience
         </p>
-        <p className="text-sm text-slate-600 dark:text-slate-400">{message}</p>
+        <p className="text-sm text-muted-foreground ">{message}</p>
         <Button size="sm" variant="outline" onClick={onBack} className="mt-2">
           Go back
         </Button>

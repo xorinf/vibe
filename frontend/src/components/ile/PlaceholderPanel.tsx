@@ -25,13 +25,13 @@ export function PlaceholderPanel({
     <div
       className={
         variant === 'inspector'
-          ? 'flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-slate-500 dark:text-slate-400'
-          : 'flex flex-col items-center justify-center gap-2 p-4 text-center text-sm text-slate-500 dark:text-slate-400'
+          ? 'flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground '
+          : 'flex flex-col items-center justify-center gap-2 p-4 text-center text-sm text-muted-foreground '
       }
     >
       <Sparkles className="h-5 w-5 text-primary/40" aria-hidden="true" />
-      <p className="text-slate-700 dark:text-slate-300">{title}</p>
-      <p className="text-xs text-slate-500 dark:text-slate-400">{hint ?? defaultHint}</p>
+      <p className="text-foreground/80 ">{title}</p>
+      <p className="text-xs text-muted-foreground ">{hint ?? defaultHint}</p>
     </div>
   );
 }

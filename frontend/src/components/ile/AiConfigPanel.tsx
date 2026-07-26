@@ -390,10 +390,10 @@ export function AiConfigPanel({
         className={cn(
           'inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
           status.kind === 'connected'
-            ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 hover:bg-emerald-100'
+            ? 'bg-primary/15  text-emerald-800 hover:bg-emerald-100'
             : loading
-              ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-              : 'bg-amber-50 dark:bg-amber-950/30 text-amber-800 hover:bg-amber-100',
+              ? 'bg-muted  text-muted-foreground '
+              : 'bg-ai/30  text-amber-800 hover:bg-amber-100',
           className,
         )}
         aria-label={
@@ -413,7 +413,7 @@ export function AiConfigPanel({
             'Checking AI…'
           ) : status.kind === 'connected' ? (
             <>
-              <span className="text-emerald-700 dark:text-emerald-400">Connected</span>
+              <span className="text-primary ">Connected</span>
               <span className="mx-1 text-emerald-400">·</span>
               <span className="text-emerald-800">
                 {providerLabel(saved?.provider ?? provider)} {saved?.model ?? model}
@@ -427,8 +427,8 @@ export function AiConfigPanel({
           className={cn(
             'inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
             status.kind === 'connected'
-              ? 'bg-white/70 dark:bg-slate-900 text-emerald-700 dark:text-emerald-400'
-              : 'bg-white/70 dark:bg-slate-900 text-amber-700 dark:text-amber-400',
+              ? 'bg-background  text-primary '
+              : 'bg-background  text-accent-foreground ',
           )}
         >
           {status.kind === 'connected' ? (
@@ -471,17 +471,17 @@ function ChipStatusDot({
   loading: boolean;
 }) {
   if (loading) {
-    return <Loader2 className="h-3 w-3 animate-spin text-slate-400 dark:text-slate-500" />;
+    return <Loader2 className="h-3 w-3 animate-spin text-muted-foreground/80 " />;
   }
   if (status.kind === 'connected') {
-    return <CheckCircle2 className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />;
+    return <CheckCircle2 className="h-3 w-3 text-primary/90 " />;
   }
   if (status.kind === 'idle' || !status || status.kind === undefined) {
-    return <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" />;
+    return <AlertTriangle className="h-3 w-3 text-accent-foreground/90 " />;
   }
   // All other statuses (network_error, invalid_key, not_configured, etc.)
   // get the amber treatment.
-  return <AlertTriangle className="h-3 w-3 text-amber-600 dark:text-amber-400" />;
+  return <AlertTriangle className="h-3 w-3 text-accent-foreground/90 " />;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -526,7 +526,7 @@ export function AiConfigFormBody({
     return (
       <div
         className={cn(
-          'flex items-center gap-2 py-8 text-sm text-slate-500 dark:text-slate-400',
+          'flex items-center gap-2 py-8 text-sm text-muted-foreground ',
           className,
         )}
       >
@@ -538,12 +538,12 @@ export function AiConfigFormBody({
     <div className={cn('space-y-4', className)}>
       {/* Provider */}
       <div className="space-y-1.5">
-        <Label htmlFor="ile-ai-provider" className="text-xs text-slate-600 dark:text-slate-400">
+        <Label htmlFor="ile-ai-provider" className="text-xs text-muted-foreground ">
           Provider
         </Label>
         <select
           id="ile-ai-provider"
-          className="w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
+          className="w-full rounded-md border border-border/80  bg-background  px-3 py-2 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           value={s.provider}
           onChange={(e) => s.setProvider(e.target.value as IleProviderId)}
           disabled={s.saving || s.testing}
@@ -554,17 +554,17 @@ export function AiConfigFormBody({
             </option>
           ))}
         </select>
-        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+        <p className="text-[11px] text-muted-foreground ">
           {ALL_PROVIDERS.find((p) => p.value === s.provider)?.description}
         </p>
       </div>
 
       {/* API Key */}
       <div className="space-y-1.5">
-        <Label htmlFor="ile-ai-key" className="text-xs text-slate-600 dark:text-slate-400">
+        <Label htmlFor="ile-ai-key" className="text-xs text-muted-foreground ">
           API Key{' '}
           {s.saved?.hasApiKey && (
-            <span className="ml-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+            <span className="ml-1 rounded-full bg-primary/15  px-2 py-0.5 text-[10px] font-medium text-primary ">
               Set · {s.saved.apiKeyMasked ?? '••••'}
             </span>
           )}
@@ -588,20 +588,20 @@ export function AiConfigFormBody({
           <button
             type="button"
             onClick={() => s.setShowKey(!s.showKey)}
-            className="absolute inset-y-0 right-0 flex h-10 items-center px-3 text-slate-400 dark:text-slate-500 hover:text-slate-700"
+            className="absolute inset-y-0 right-0 flex h-10 items-center px-3 text-muted-foreground/80  hover:text-slate-700"
             aria-label={s.showKey ? 'Hide API key' : 'Show API key'}
           >
             {s.showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
           </button>
         </div>
-        <p className="text-[10px] text-slate-400 dark:text-slate-500">
+        <p className="text-[10px] text-muted-foreground/80 ">
           Stored per teacher. Never sent back to the browser after the first save.
         </p>
       </div>
 
       {/* Model */}
       <div className="space-y-1.5">
-        <Label htmlFor="ile-ai-model" className="text-xs text-slate-600 dark:text-slate-400">
+        <Label htmlFor="ile-ai-model" className="text-xs text-muted-foreground ">
           Model
         </Label>
         <Input
@@ -617,7 +617,7 @@ export function AiConfigFormBody({
       {/* Base URL — only shown when the provider needs one */}
       {s.needsBaseUrl && (
         <div className="space-y-1.5">
-          <Label htmlFor="ile-ai-baseurl" className="text-xs text-slate-600 dark:text-slate-400">
+          <Label htmlFor="ile-ai-baseurl" className="text-xs text-muted-foreground ">
             Base URL
           </Label>
           <Input
@@ -628,7 +628,7 @@ export function AiConfigFormBody({
             className="text-sm"
             disabled={s.saving || s.testing}
           />
-          <p className="text-[10px] text-slate-400 dark:text-slate-500">
+          <p className="text-[10px] text-muted-foreground/80 ">
             Required for Custom. Optional override for OpenRouter.
           </p>
         </div>
@@ -639,7 +639,7 @@ export function AiConfigFormBody({
         <StatusDetail status={s.status} />
       )}
       {s.hasTested && s.status.kind === 'connected' && s.status.modelEcho && (
-        <p className="rounded-md bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
+        <p className="rounded-md bg-primary/15  px-3 py-2 text-xs text-primary ">
           Connection verified with <code>{s.status.modelEcho}</code>.
         </p>
       )}

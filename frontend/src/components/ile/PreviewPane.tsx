@@ -81,10 +81,10 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
   }, []);
 
   return (
-    <div className={cn('relative flex h-full flex-col bg-slate-100 dark:bg-slate-800', className)}>
+    <div className={cn('relative flex h-full flex-col bg-muted ', className)}>
       {/* Toolbar */}
-      <div className="flex items-center justify-between border-b bg-white dark:bg-slate-900 px-4 py-2">
-        <div className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-slate-400">
+      <div className="flex items-center justify-between border-b bg-background  px-4 py-2">
+        <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground ">
           <Eye className="h-3.5 w-3.5" />
           Live preview
         </div>
@@ -96,7 +96,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
                 size="sm"
                 variant="ghost"
                 onClick={reload}
-                className="h-7 gap-1 px-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground  hover:text-slate-900"
                 title="Reload preview"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
@@ -106,7 +106,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
                 size="sm"
                 variant="ghost"
                 onClick={enterFullscreen}
-                className="h-7 gap-1 px-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground  hover:text-slate-900"
                 title="Open in fullscreen"
               >
                 <Maximize2 className="h-3.5 w-3.5" />
@@ -125,7 +125,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
         className="relative flex-1 overflow-hidden bg-slate-900/5"
       >
         <div className="h-full w-full p-3">
-          <div className="relative h-full w-full overflow-hidden rounded-lg border bg-white dark:bg-slate-900 shadow-sm">
+          <div className="relative h-full w-full overflow-hidden rounded-lg border bg-background  shadow-sm">
             {hasHtml ? (
               // Teacher-side preview: do NOT inject the runtime SDK. This
               // preview is for inspecting generated HTML, not for analytics
@@ -147,10 +147,10 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
             {/* Streaming-progress pill — shows the size of the new artifact
                 as it streams in. Sits under the (preserved) preview. */}
             {showOverlay && (
-              <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-white/95 dark:bg-slate-900 px-3 py-1.5 text-xs text-slate-700 dark:text-slate-300 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700">
+              <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-background  px-3 py-1.5 text-xs text-foreground/80  shadow-sm ring-1 ring-ring ">
                 <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
                 {state.reasoning ? 'Thinking…' : 'Editing…'}
-                <span className="text-slate-400 dark:text-slate-500">
+                <span className="text-muted-foreground/80 ">
                   {(state.html.length / 1024).toFixed(1)} KB
                 </span>
               </div>
@@ -159,7 +159,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
             {/* Soft dim overlay while streaming so the user can still see
                 the previous artifact behind the incoming changes. */}
             {showOverlay && state.html && (
-              <div className="pointer-events-none absolute inset-0 rounded-lg bg-white/15 dark:bg-slate-900" />
+              <div className="pointer-events-none absolute inset-0 rounded-lg bg-background " />
             )}
 
             {/* Fullscreen Exit button — only shown while the preview
@@ -184,17 +184,17 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
 
       {/* Runtime error banner (uncaught JS in the sandbox) */}
       {runtimeError && (
-        <div className="absolute left-3 right-3 top-3 flex items-start gap-2 rounded-md border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-xs text-rose-800 shadow-sm">
+        <div className="absolute left-3 right-3 top-3 flex items-start gap-2 rounded-md border border-destructive/30  bg-destructive/15  px-3 py-2 text-xs text-rose-800 shadow-sm">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div className="flex-1 space-y-1">
             <p className="font-medium">Sandbox runtime error</p>
-            <p className="font-mono text-[11px] text-rose-700 dark:text-rose-400">{runtimeError}</p>
+            <p className="font-mono text-[11px] text-destructive ">{runtimeError}</p>
           </div>
           <Button
             size="sm"
             variant="outline"
             onClick={reload}
-            className="h-6 border-rose-200 dark:border-rose-800 px-2 text-[11px] text-rose-700 dark:text-rose-400 hover:bg-rose-100"
+            className="h-6 border-destructive/30  px-2 text-[11px] text-destructive  hover:bg-rose-100"
           >
             Reload
           </Button>
@@ -215,24 +215,24 @@ function StatusLabel({ state }: { state: IleStreamState }) {
       : state.status === 'error'
       ? 'Error'
       : 'Idle';
-  return <span className="text-[11px] text-slate-400 dark:text-slate-500">{label}</span>;
+  return <span className="text-[11px] text-muted-foreground/80 ">{label}</span>;
 }
 
 function EmptyPreview() {
   return (
     <div className="flex h-full items-center justify-center bg-gradient-to-br from-slate-50 to-white px-6 text-center">
       <div className="max-w-sm space-y-3">
-        <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-600 dark:text-violet-400">
+        <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-ai/40  text-primary/90 ">
           <Eye className="h-5 w-5" />
         </div>
-        <p className="text-base font-medium text-slate-900 dark:text-slate-100">
+        <p className="text-base font-medium text-foreground ">
           Your experience will appear here
         </p>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <p className="text-sm text-muted-foreground ">
           Describe the lesson on the left. The AI will stream an interactive
           HTML experience into this preview as it generates.
         </p>
-        <p className="text-xs text-slate-400 dark:text-slate-500">
+        <p className="text-xs text-muted-foreground/80 ">
           Try: <em>"Explain binary search with a step-through visualization"</em>
         </p>
       </div>

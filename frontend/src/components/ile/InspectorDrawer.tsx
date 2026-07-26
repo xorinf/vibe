@@ -73,7 +73,7 @@ export const InspectorDrawer = forwardRef<HTMLDivElement, InspectorDrawerProps>(
       <aside
         ref={ref}
         className={cn(
-          'w-[360px] flex min-h-0 shrink-0 flex-col border-l border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 animate-in slide-in-from-right-2 duration-200',
+          'w-[360px] flex min-h-0 shrink-0 flex-col border-l border-border  bg-background  animate-in slide-in-from-right-2 duration-200',
           className,
         )}
       >
@@ -147,7 +147,7 @@ function InspectorTabStrip({
   onClose: () => void;
 }) {
   return (
-    <div className="flex h-9 shrink-0 items-center border-b border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/60">
+    <div className="flex h-9 shrink-0 items-center border-b border-border  bg-card ">
       <div className="flex h-full flex-1 items-stretch overflow-x-auto">
         {INSPECTOR_TABS.map((t) => (
           <button
@@ -157,10 +157,10 @@ function InspectorTabStrip({
             aria-selected={tab === t.id}
             onClick={() => onTabChange(t.id)}
             className={cn(
-              'relative flex items-center gap-1.5 border-r border-slate-200 dark:border-slate-700 px-3 text-[11px] font-medium transition-colors',
+              'relative flex items-center gap-1.5 border-r border-border  px-3 text-[11px] font-medium transition-colors',
               tab === t.id
-                ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100'
-                : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
+                ? 'bg-background  text-foreground '
+                : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
             )}
           >
             {tab === t.id && (
@@ -179,7 +179,7 @@ function InspectorTabStrip({
         onClick={onClose}
         aria-label="Hide inspector"
         title="Hide inspector"
-        className="h-7 w-7 mr-1 text-slate-500 dark:text-slate-400 hover:text-slate-900"
+        className="h-7 w-7 mr-1 text-muted-foreground  hover:text-slate-900"
       >
         <X className="h-3.5 w-3.5" />
       </Button>

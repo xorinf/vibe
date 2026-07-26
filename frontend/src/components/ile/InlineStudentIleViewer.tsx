@@ -125,7 +125,7 @@ export function InlineStudentIleViewer({
             onClick={handleReload}
             aria-label="Reload experience"
             title="Reload"
-            className="absolute right-3 top-3 z-10 h-9 w-9 bg-white/80 dark:bg-slate-900 shadow-sm hover:bg-white"
+            className="absolute right-3 top-3 z-10 h-9 w-9 bg-background  shadow-sm hover:bg-white"
           >
             <RefreshCw className="h-4 w-4" />
           </Button>

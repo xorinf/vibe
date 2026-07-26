@@ -67,7 +67,7 @@ export function IleWorkspaceDialog({
         // competing for the same corner. Selector targets the Radix
         // button specifically — the only <button> whose only child is
         // a sr-only span — our header close has an icon.
-        className="h-[95vh] w-[min(1400px,95vw)] max-w-none gap-0 overflow-hidden border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 p-0 [&>button:has(>span.sr-only)]:hidden"
+        className="h-[95vh] w-[min(1400px,95vw)] max-w-none gap-0 overflow-hidden border-border  bg-card  p-0 [&>button:has(>span.sr-only)]:hidden"
         aria-describedby="ile-workspace-description"
       >
         <DialogHeader className="sr-only">

@@ -124,7 +124,7 @@ export function StudentPlayerChrome({
     <div
       className={cn(
         'relative flex h-full w-full flex-col',
-        isDark ? 'bg-slate-950 text-slate-100' : 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100',
+        isDark ? 'bg-slate-950 text-slate-100' : 'bg-background  text-foreground ',
         className,
       )}
       data-testid="student-player-chrome"
@@ -136,7 +136,7 @@ export function StudentPlayerChrome({
           role="status"
           aria-live="polite"
           data-testid="ile-impersonation-banner"
-          className="flex w-full items-center justify-center gap-2 bg-amber-100 dark:bg-amber-900/40 px-4 py-2 text-sm font-medium text-amber-800 border-b border-amber-300"
+          className="flex w-full items-center justify-center gap-2 bg-ai/40  px-4 py-2 text-sm font-medium text-amber-800 border-b border-amber-300"
         >
           <Eye className="h-4 w-4" aria-hidden="true" />
           <span>You are viewing this as a student. Your actions here are not recorded.</span>
@@ -149,7 +149,7 @@ export function StudentPlayerChrome({
           'flex items-center justify-between px-4 py-2 backdrop-blur',
           isDark
             ? 'border-b border-slate-800 bg-slate-900/80'
-            : 'border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60',
+            : 'border-b border-border  bg-card ',
         )}
       >
         <div className="flex items-center gap-3">
@@ -162,13 +162,13 @@ export function StudentPlayerChrome({
             ✦
           </span>
           <div>
-            <h1 className={cn('text-sm font-semibold', isDark ? '' : 'text-slate-900 dark:text-slate-100')}>
+            <h1 className={cn('text-sm font-semibold', isDark ? '' : 'text-foreground ')}>
               {title}
             </h1>
             <p
               className={cn(
                 'text-[11px]',
-                isDark ? 'text-slate-400 dark:text-slate-500' : 'text-slate-500 dark:text-slate-400',
+                isDark ? 'text-muted-foreground/80 ' : 'text-muted-foreground ',
               )}
             >
               {progressValue > 0 && progressValue < 100
@@ -203,7 +203,7 @@ export function StudentPlayerChrome({
                 'h-10 w-10',
                 isDark
                   ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
+                  : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
               )}
             >
               <Copy className="h-4 w-4" />
@@ -220,7 +220,7 @@ export function StudentPlayerChrome({
                 'h-10 w-10',
                 isDark
                   ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
+                  : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
               )}
             >
               <Eye className="h-4 w-4" />
@@ -237,7 +237,7 @@ export function StudentPlayerChrome({
                 'h-10 w-10',
                 isDark
                   ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
+                  : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
               )}
             >
               {isFullscreen ? (
@@ -258,7 +258,7 @@ export function StudentPlayerChrome({
                 'h-10 w-10',
                 isDark
                   ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900',
+                  : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
               )}
             >
               <X className="h-4 w-4" />
@@ -269,7 +269,7 @@ export function StudentPlayerChrome({
 
       {/* Progress strip — hidden at 0% and 100% to keep the chrome clean. */}
       <div
-        className={cn('h-0.5', isDark ? 'bg-slate-800' : 'bg-slate-100 dark:bg-slate-800')}
+        className={cn('h-0.5', isDark ? 'bg-slate-800' : 'bg-muted ')}
         role="progressbar"
         aria-valuenow={progressValue}
         aria-valuemin={0}
@@ -289,7 +289,7 @@ export function StudentPlayerChrome({
       </div>
 
       {/* Body */}
-      <div className={cn('relative flex-1', isDark ? 'bg-white dark:bg-slate-900' : 'bg-white dark:bg-slate-900')}>
+      <div className={cn('relative flex-1', isDark ? 'bg-background ' : 'bg-background ')}>
         {loading && (
           <LoadingOverlay message={emptyMessage} />
         )}
@@ -317,7 +317,7 @@ export function StudentPlayerChrome({
 
 function LoadingOverlay({ message }: { message?: string }) {
   return (
-    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-white dark:bg-slate-900 text-sm text-slate-500 dark:text-slate-400">
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-background  text-sm text-muted-foreground ">
       <div className="flex items-center gap-2">
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
         {message ?? 'Loading experience…'}
@@ -334,13 +334,13 @@ function ErrorOverlay({
   onRetry?: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white dark:bg-slate-900 px-6 text-center">
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-background  px-6 text-center">
       <div className="max-w-md space-y-3">
         <AlertTriangle className="mx-auto h-8 w-8 text-rose-400" />
-        <p className="text-base font-medium text-slate-900 dark:text-slate-100">
+        <p className="text-base font-medium text-foreground ">
           Couldn&apos;t load this experience
         </p>
-        <p className="text-sm text-slate-600 dark:text-slate-400">{message}</p>
+        <p className="text-sm text-muted-foreground ">{message}</p>
         {onRetry && (
           <Button size="lg" variant="outline" onClick={onRetry} className="mt-2">
             Go back

@@ -168,7 +168,7 @@ export function SandboxIframe({
         // the strict sandbox.
         sandbox="allow-scripts allow-same-origin"
         srcDoc={srcdoc}
-        className="h-full min-h-full w-full border-0 bg-white dark:bg-slate-900"
+        className="h-full min-h-full w-full border-0 bg-background "
         referrerPolicy="no-referrer"
         // The SDK's READY postMessage never fires in the teacher preview
         // (we don't inject the SDK here so we don't pollute student
@@ -182,8 +182,8 @@ export function SandboxIframe({
         }}
       />
       {showOverlay && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-white/40 dark:bg-slate-900 backdrop-blur-[1px]">
-          <div className="flex items-center gap-2 rounded-full bg-white dark:bg-slate-900 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 shadow-sm ring-1 ring-slate-200 dark:ring-slate-700">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background  backdrop-blur-[1px]">
+          <div className="flex items-center gap-2 rounded-full bg-background  px-3 py-1.5 text-xs text-muted-foreground  shadow-sm ring-1 ring-ring ">
             <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
             Booting experience…
           </div>

@@ -500,12 +500,12 @@ export function TeacherILEWorkspace({
   const isConfigured = configState === 'configured';
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-white dark:bg-slate-900">
+    <div className="flex h-full min-h-0 flex-col bg-background ">
       {/* ── HEADER 48px ──────────────────────────────────────────── */}
       <header
         className={cn(
           'h-12',
-          'flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3',
+          'flex shrink-0 items-center gap-2 border-b border-border  bg-background  px-3',
         )}
       >
         <div className="flex min-w-0 items-center gap-2">
@@ -514,27 +514,27 @@ export function TeacherILEWorkspace({
           </span>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+              <h1 className="truncate text-sm font-semibold text-foreground ">
                 {title || 'Untitled Experience'}
               </h1>
               {isDirty ? (
-                <span className="rounded-full bg-amber-50 dark:bg-amber-950/30 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                <span className="rounded-full bg-ai/30  px-1.5 py-0.5 text-[10px] font-medium text-accent-foreground ">
                   Unsaved
                 </span>
               ) : lastSavedAt ? (
-                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/30 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-primary/15  px-1.5 py-0.5 text-[10px] font-medium text-primary ">
                   <Check className="h-2.5 w-2.5" />
                   Saved {lastSavedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </span>
               ) : null}
               {saving ? (
-                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-muted  px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground ">
                   <Check className="h-2.5 w-2.5 animate-pulse" />
                   Saving…
                 </span>
               ) : null}
             </div>
-            <p className="truncate text-[11px] text-slate-500 dark:text-slate-400">
+            <p className="truncate text-[11px] text-muted-foreground ">
               Interactive Learning Experience
               {courseVersionId ? ` · course ${courseVersionId.slice(-6)}` : ''}
             </p>
@@ -562,7 +562,7 @@ export function TeacherILEWorkspace({
               <HistoryIcon className="h-3.5 w-3.5" />
               <span className="hidden md:inline">History</span>
               {saved.currentVersion > 0 && (
-                <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-1 text-[10px] font-medium text-slate-600 dark:text-slate-400">
+                <span className="rounded-full bg-muted  px-1 text-[10px] font-medium text-muted-foreground ">
                   v{saved.currentVersion}
                 </span>
               )}
@@ -583,7 +583,7 @@ export function TeacherILEWorkspace({
             variant="ghost"
             onClick={handleSave}
             disabled={saving || !effectiveHtml}
-            className="h-8 gap-1 px-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900"
+            className="h-8 gap-1 px-2 text-xs text-muted-foreground  hover:text-slate-900"
             title="Save the current draft (Ctrl+S)"
             aria-label="Save draft"
           >
@@ -601,7 +601,7 @@ export function TeacherILEWorkspace({
             onClick={handleClose}
             aria-label="Close workspace"
             title="Close"
-            className="h-8 w-8 text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900"
+            className="h-8 w-8 text-muted-foreground  hover:bg-slate-100 hover:text-slate-900"
           >
             <X className="h-4 w-4" />
           </Button>
@@ -691,16 +691,16 @@ export function TeacherILEWorkspace({
       {/* AI config dialog */}
       <Dialog open={aiConfigOpen} onOpenChange={setAiConfigOpen}>
         <DialogContent
-          className="h-[min(640px,90vh)] w-[min(560px,95vw)] gap-0 overflow-hidden border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-0 [&>button:has(>span.sr-only)]:hidden"
+          className="h-[min(640px,90vh)] w-[min(560px,95vw)] gap-0 overflow-hidden border-border  bg-background  p-0 [&>button:has(>span.sr-only)]:hidden"
         >
-          <DialogHeader className="border-b border-slate-200 dark:border-slate-700 px-5 py-3">
+          <DialogHeader className="border-b border-border  px-5 py-3">
             <div className="flex items-center gap-2">
               <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/15 text-primary">
                 <Settings2 className="h-3.5 w-3.5" />
               </span>
               <div>
                 <DialogTitle className="text-base">AI provider</DialogTitle>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
+                <p className="text-xs text-muted-foreground ">
                   Pick a provider, paste your key, hit Test, then Save.
                 </p>
               </div>

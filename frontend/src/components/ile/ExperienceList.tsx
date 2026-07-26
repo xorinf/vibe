@@ -91,7 +91,7 @@ export function ExperienceList({
   }
 
   return (
-    <div className={cn('flex h-full flex-col bg-slate-50 dark:bg-slate-900/60', className)}>
+    <div className={cn('flex h-full flex-col bg-card ', className)}>
       {/* Header — one big "Create new experience" button is the primary
           action. The "Manage every experience you've authored" copy
           makes the purpose explicit. The search is collapsed into a
@@ -101,14 +101,14 @@ export function ExperienceList({
           status filter and "Show archived" toggle were overbuilt: the
           same controls exist per-card via the Actions menu (Archive /
           Unarchive), so the user doesn't need them at the top. */}
-      <div className="border-b bg-white dark:bg-slate-900 px-5 py-4">
+      <div className="border-b bg-background  px-5 py-4">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h1 className="flex items-center gap-2 text-base font-semibold text-slate-900 dark:text-slate-100">
+            <h1 className="flex items-center gap-2 text-base font-semibold text-foreground ">
               <Sparkles className="h-4 w-4 text-primary" />
               Interactive Learning Experiences
             </h1>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+            <p className="mt-0.5 text-xs text-muted-foreground ">
               Every experience you've authored — drafts, published, archived.
             </p>
           </div>
@@ -132,14 +132,14 @@ export function ExperienceList({
       {/* List */}
       <div className="flex-1 overflow-y-auto px-5 py-4">
         {loading && items.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-20 text-sm text-slate-500 dark:text-slate-400">
+          <div className="flex items-center justify-center gap-2 py-20 text-sm text-muted-foreground ">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading…
           </div>
         ) : items.length === 0 ? (
           <EmptyState onCreate={createNew} />
         ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+          <div className="py-12 text-center text-sm text-muted-foreground ">
             <p>No experiences match "{query}".</p>
             <button
               type="button"
@@ -183,7 +183,7 @@ function SearchInput({
     <div className="flex items-center">
       {open ? (
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/80 " />
           <input
             autoFocus
             value={value}
@@ -192,14 +192,14 @@ function SearchInput({
               if (!value) setOpen(false);
             }}
             placeholder="Search by title…"
-            className="w-56 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 py-1.5 pl-8 pr-3 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
+            className="w-56 rounded-md border border-border/80  bg-background  py-1.5 pl-8 pr-3 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
       ) : (
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 dark:text-slate-400 hover:bg-slate-100 hover:text-slate-900"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground  hover:bg-slate-100 hover:text-slate-900"
           aria-label="Search"
           title="Search experiences"
         >
@@ -230,21 +230,21 @@ function ExperienceCard({
         onClick={onOpen}
         aria-label={`Open ${item.title || 'Untitled Experience'}`}
         className={cn(
-          'group flex w-full flex-col items-stretch rounded-lg border bg-white dark:bg-slate-900 p-4 text-left shadow-sm transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40',
-          archived ? 'border-slate-200 dark:border-slate-700 opacity-75' : 'border-slate-200 dark:border-slate-700 hover:border-primary/30',
+          'group flex w-full flex-col items-stretch rounded-lg border bg-background  p-4 text-left shadow-sm transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40',
+          archived ? 'border-border  opacity-75' : 'border-border  hover:border-primary/30',
         )}
       >
         <div className="flex items-start justify-between gap-2">
-          <h3 className="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-slate-100">
+          <h3 className="line-clamp-2 text-sm font-semibold text-foreground ">
             {item.title || 'Untitled Experience'}
           </h3>
           <StatusBadge status={item.status} />
         </div>
 
-        <dl className="mt-3 space-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+        <dl className="mt-3 space-y-1 text-[11px] text-muted-foreground ">
           <div className="flex items-center justify-between">
             <dt>Version</dt>
-            <dd className="font-mono text-slate-700 dark:text-slate-300">v{item.currentVersion}</dd>
+            <dd className="font-mono text-foreground/80 ">v{item.currentVersion}</dd>
           </div>
           <div className="flex items-center justify-between">
             <dt>Updated</dt>
@@ -253,7 +253,7 @@ function ExperienceCard({
           {item.authorName && (
             <div className="flex items-center justify-between">
               <dt>Author</dt>
-              <dd className="truncate text-slate-700 dark:text-slate-300">{item.authorName}</dd>
+              <dd className="truncate text-foreground/80 ">{item.authorName}</dd>
             </div>
           )}
           {archived && item.archivedAt && (
@@ -276,21 +276,21 @@ function ExperienceCard({
 function StatusBadge({ status }: { status: IleExperienceListItem['status'] }) {
   if (status === 'published') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary/25  px-2 py-0.5 text-[10px] font-medium text-primary ">
         Published
       </span>
     );
   }
   if (status === 'archived') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-400">
+      <span className="inline-flex items-center gap-1 rounded-full bg-muted  px-2 py-0.5 text-[10px] font-medium text-muted-foreground ">
         <Archive className="h-2.5 w-2.5" />
         Archived
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+    <span className="inline-flex items-center gap-1 rounded-full bg-ai/40  px-2 py-0.5 text-[10px] font-medium text-accent-foreground ">
       Draft
     </span>
   );
@@ -303,10 +303,10 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
         <FileText className="h-5 w-5" />
       </div>
       <div className="max-w-sm space-y-1">
-        <p className="text-base font-medium text-slate-900 dark:text-slate-100">
+        <p className="text-base font-medium text-foreground ">
           No experiences yet
         </p>
-        <p className="text-sm text-slate-500 dark:text-slate-400">
+        <p className="text-sm text-muted-foreground ">
           Generate your first interactive experience. Describe the lesson, pick
           a provider in the AI Configuration panel, and the AI will stream an
           HTML experience into the preview.
