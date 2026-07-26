@@ -22,14 +22,30 @@ const KEY_MASK_PREVIEW_CHARS = 4;
 /**
  * Masks an API key for display: keep the first/last few chars and replace
  * the middle with dots. Never returns the full key.
+ *
+ * Defensive: older rows in Mongo may have the key stored as a Buffer
+ * (or some other non-string type) from a previous write path. We
+ * coerce to string first so a single bad row doesn't 500 the
+ * /api/interactive-experiences/config endpoint for the whole
+ * teacher. The next save through the normal path will overwrite
+ * it with a real string.
  */
-function maskKey(key: string): string {
-  if (!key) return '';
-  if (key.length <= KEY_MASK_PREVIEW_CHARS * 2 + 3) {
+function maskKey(key: unknown): string {
+  if (key == null) return '';
+  const s =
+    typeof key === 'string'
+      ? key
+      : Buffer.isBuffer(key)
+        ? key.toString('utf8')
+        : typeof key === 'object' && 'toString' in (key as object)
+          ? (key as { toString(): string }).toString()
+          : '';
+  if (!s) return '';
+  if (s.length <= KEY_MASK_PREVIEW_CHARS * 2 + 3) {
     return '••••';
   }
-  const start = key.slice(0, KEY_MASK_PREVIEW_CHARS);
-  const end = key.slice(-KEY_MASK_PREVIEW_CHARS);
+  const start = s.slice(0, KEY_MASK_PREVIEW_CHARS);
+  const end = s.slice(-KEY_MASK_PREVIEW_CHARS);
   return `${start}••••${end}`;
 }
 
