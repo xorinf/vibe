@@ -27,20 +27,20 @@ export class GenerateIleBody {
   prompt: string;
 
   @JSONSchema({
-    description: 'Course ID (for owner/scope checks)',
+    description: 'Course ID (for owner/scope checks). Omit for global experiences that can be attached to any course later.',
     type: 'string',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  courseId: string;
+  courseId?: string;
 
   @JSONSchema({
-    description: 'Course version ID (for owner/scope checks)',
+    description: 'Course version ID (for owner/scope checks). Omit for global experiences.',
     type: 'string',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  courseVersionId: string;
+  courseVersionId?: string;
 
   @JSONSchema({
     description: 'Optional item ID — set when generating from an item context',
@@ -64,20 +64,20 @@ export class SaveIleBody {
   _id?: string;
 
   @JSONSchema({
-    description: 'Course ID',
+    description: 'Course ID. Omit for global experiences.',
     type: 'string',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  courseId: string;
+  courseId?: string;
 
   @JSONSchema({
-    description: 'Course version ID',
+    description: 'Course version ID. Omit for global experiences.',
     type: 'string',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  courseVersionId: string;
+  courseVersionId?: string;
 
   @JSONSchema({
     description: 'Optional item ID to bind this experience to',
@@ -202,20 +202,20 @@ export class RenameIleBody {
  */
 export class VersionedSaveIleBody {
   @JSONSchema({
-    description: 'Course ID',
+    description: 'Course ID. Omit for global experiences.',
     type: 'string',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  courseId: string;
+  courseId?: string;
 
   @JSONSchema({
-    description: 'Course version ID',
+    description: 'Course version ID. Omit for global experiences.',
     type: 'string',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  courseVersionId: string;
+  courseVersionId?: string;
 
   @JSONSchema({
     description: 'Optional item ID to bind this experience to',

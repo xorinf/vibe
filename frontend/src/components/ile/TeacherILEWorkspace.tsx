@@ -177,9 +177,9 @@ export function TeacherILEWorkspace({
     return () => clearTimeout(t);
   }, [activeTool, inspectorOpen, inspectorTab, editorRatio]);
 
-  // ───────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
   // Save / publish / lifecycle
-  // ───────────────────────────────────────────────────────────────────
+  // ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (experienceId) {
       let cancelled = false;
@@ -198,9 +198,17 @@ export function TeacherILEWorkspace({
         cancelled = true;
       };
     }
-    if (courseId && courseVersionId) {
-      setFreshCanvas({ courseId, courseVersionId, itemId });
-    }
+    // No experienceId — fresh-canvas mode. Always set the fresh
+    // canvas (even without a course context) so the next send()
+    // routes through the generate path. The backend stores
+    // courseId/courseVersionId as empty strings when no course
+    // context is bound, and the teacher can attach the experience
+    // to a course later via the item-level Save / Publish flow.
+    setFreshCanvas({
+      courseId: courseId ?? '',
+      courseVersionId: courseVersionId ?? '',
+      itemId: itemId ?? undefined,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [experienceId]);
 

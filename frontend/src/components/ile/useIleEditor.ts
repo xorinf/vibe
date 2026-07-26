@@ -187,12 +187,39 @@ function cryptoRandomId(): string {
  * experience is loaded; from then on, the editor owns the head state.
  */
 export function useIleEditor(): UseIleEditorApi {
-  const [stream, setStream] = useState<IleStreamState>({
+  const [stream, setStreamRaw] = useState<IleStreamState>({
     html: '',
     progress: [],
     reasoning: false,
     status: 'idle',
   });
+  // Defensive wrapper: never let the stream state land on
+  // undefined. We saw the raw setter receive undefined from a
+  // bad code path and the downstream `stream.status` access
+  // would crash the whole workspace with "Cannot read
+  // properties of undefined (reading 'status')". The ILE
+  // workspace is the user's main canvas, so a runaway render
+  // here is high-cost — fall back to the idle initial state
+  // if anything ever passes undefined.
+  const setStream: typeof setStreamRaw = (updater) => {
+    setStreamRaw((prev) => {
+      const next =
+        typeof updater === 'function'
+          ? (updater as (p: IleStreamState) => IleStreamState)(prev)
+          : updater;
+      if (next === undefined || next === null) {
+        // eslint-disable-next-line no-console
+        console.warn('[ILE] setStream received undefined/null; falling back to idle');
+        return {
+          html: '',
+          progress: [],
+          reasoning: false,
+          status: 'idle',
+        };
+      }
+      return next;
+    });
+  };
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [undoStack, setUndoStack] = useState<string[]>([]);
   const [redoStack, setRedoStack] = useState<string[]>([]);
@@ -357,19 +384,29 @@ export function useIleEditor(): UseIleEditorApi {
 
       const onEvent = (ev: IleStreamEvent) => {
         setStream((prev) => {
+          // Defensive: the very first event in a stream can race
+          // a state reset, leaving prev undefined for one frame.
+          // Anchor to the baseline initial state so every case
+          // branch has a complete shape to spread from.
+          const base = prev ?? {
+            html: '',
+            progress: [],
+            reasoning: false,
+            status: 'idle' as const,
+          };
           switch (ev.kind) {
             case 'start':
-              return { ...prev, experienceId: ev.experienceId };
+              return { ...base, experienceId: ev.experienceId };
             case 'progress':
-              if (prev.progress.includes(ev.message)) return prev;
+              if (base.progress.includes(ev.message)) return base;
               return {
-                ...prev,
-                progress: [...prev.progress, ev.message].slice(-8),
+                ...base,
+                progress: [...base.progress, ev.message].slice(-8),
                 lastProgress: ev.message,
                 reasoning: false,
               };
             case 'reasoning':
-              return { ...prev, reasoning: true };
+              return { ...base, reasoning: true };
             case 'html':
               setMessages((ms) =>
                 ms.map((m) =>
@@ -379,8 +416,8 @@ export function useIleEditor(): UseIleEditorApi {
                 ),
               );
               return {
-                ...prev,
-                html: prev.html + ev.delta,
+                ...base,
+                html: base.html + ev.delta,
                 reasoning: false,
                 lastDeltaAt: Date.now(),
               };
@@ -403,12 +440,12 @@ export function useIleEditor(): UseIleEditorApi {
               );
               inFlightMsgIdRef.current = null;
               return {
-                ...prev,
+                ...base,
                 status: 'done',
-                html: ev.html || prev.html,
+                html: ev.html || base.html,
                 experienceId: ev.experienceId,
                 reasoning: false,
-                truncated: ev.truncated ?? prev.truncated,
+                truncated: ev.truncated ?? base.truncated,
               };
             case 'error':
               setMessages((ms) =>
@@ -420,7 +457,7 @@ export function useIleEditor(): UseIleEditorApi {
               );
               inFlightMsgIdRef.current = null;
               return {
-                ...prev,
+                ...base,
                 status: 'error',
                 error: ev.message,
                 reasoning: false,
@@ -472,14 +509,15 @@ export function useIleEditor(): UseIleEditorApi {
         setPending(true);
         return;
       }
-      const cId = courseIdRef.current;
-      const cVId = courseVersionIdRef.current;
-      if (!cId || !cVId) return;
+      // courseId / courseVersionId are optional on the create
+      // path — the backend stores empty strings when there's no
+      // course context. The teacher can attach the new experience
+      // to a course item later via the item-level Save / Publish.
       startEditStream({
         kind: 'generate',
         prompt: trimmed,
-        courseId: cId,
-        courseVersionId: cVId,
+        courseId: courseIdRef.current ?? '',
+        courseVersionId: courseVersionIdRef.current ?? '',
         itemId: itemIdRef.current,
       });
     },
@@ -673,10 +711,10 @@ export function useIleEditor(): UseIleEditorApi {
   // can no-op once the server has confirmed done or error. The
   // connection itself is closed by bindIleStream (ileApi.ts).
   useEffect(() => {
-    if (stream.status === 'done' || stream.status === 'error') {
+    if (stream?.status === 'done' || stream?.status === 'error') {
       cancelRef.current = null;
     }
-  }, [stream.status]);
+  }, [stream?.status]);
 
   // ───────────────────────────────────────────────────────────────────
   // Cancellation on unmount
