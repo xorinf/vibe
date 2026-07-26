@@ -25,6 +25,15 @@ if (!admin.apps.length) {
     });
   }
 }
+  // When FIREBASE_AUTH_EMULATOR_HOST is set, route auth() to the local
+  // emulator instead of the real Firebase project. Unblocks
+  // verifyIdToken for tokens issued by the frontend auth emulator.
+  if (appConfig.firebase.authEmulatorHost) {
+    const [host, portStr] = appConfig.firebase.authEmulatorHost.split(':');
+    const port = Number(portStr) || 9099;
+    (admin.auth() as any).useEmulator(host, port);
+  }
+
 @injectable()
 export class UserRepository implements IUserRepository {
   private usersCollection!: Collection<IUser>;

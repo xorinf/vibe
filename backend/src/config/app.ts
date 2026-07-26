@@ -39,6 +39,11 @@ export const appConfig = {
     projectId: env('FIREBASE_PROJECT_ID') || undefined,
     apiKey: env('FIREBASE_API_KEY') || undefined,
     storageBucket: env('FIREBASE_STORAGE_BUCKET') || 'vibe-aiserver-data',
+    // Optional Auth emulator host (e.g. '127.0.0.1:9099'). When set, the
+    // admin SDK's auth() instance routes verifyIdToken calls to the local
+    // emulator instead of the real Firebase project. The frontend env var
+    // is VITE_USE_FIREBASE_EMULATOR=true (set in frontend/.env).
+    authEmulatorHost: env('FIREBASE_AUTH_EMULATOR_HOST') || undefined,
   },
   sentry: {
     dsn: env('SENTRY_DSN') || undefined,
