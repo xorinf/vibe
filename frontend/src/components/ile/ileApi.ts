@@ -524,6 +524,8 @@ export interface ExperienceAnalytics {
   }[];
 }
 
+// Analytics endpoints and response types are kept here so teacher panels share
+// one wire contract with the backend analytics service.
 export interface AnalyticsBucket {
   date: string; studentsStarted: number; studentsCompleted: number; errors: number;
   retries: number; resumes: number; averageTimeActiveMs: number;
