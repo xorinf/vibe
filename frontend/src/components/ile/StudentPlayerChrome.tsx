@@ -202,8 +202,8 @@ export function StudentPlayerChrome({
               className={cn(
                 'h-10 w-10',
                 isDark
-                  ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
+                  ? 'text-slate-300 hover:bg-slate-800 hover:text-accent-foreground'
+                  : 'text-muted-foreground  hover:bg-accent hover:text-accent-foreground',
               )}
             >
               <Copy className="h-4 w-4" />
@@ -219,8 +219,8 @@ export function StudentPlayerChrome({
               className={cn(
                 'h-10 w-10',
                 isDark
-                  ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
+                  ? 'text-slate-300 hover:bg-slate-800 hover:text-accent-foreground'
+                  : 'text-muted-foreground  hover:bg-accent hover:text-accent-foreground',
               )}
             >
               <Eye className="h-4 w-4" />
@@ -236,8 +236,8 @@ export function StudentPlayerChrome({
               className={cn(
                 'h-10 w-10',
                 isDark
-                  ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
+                  ? 'text-slate-300 hover:bg-slate-800 hover:text-accent-foreground'
+                  : 'text-muted-foreground  hover:bg-accent hover:text-accent-foreground',
               )}
             >
               {isFullscreen ? (
@@ -257,8 +257,8 @@ export function StudentPlayerChrome({
               className={cn(
                 'h-10 w-10',
                 isDark
-                  ? 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
+                  ? 'text-slate-300 hover:bg-slate-800 hover:text-accent-foreground'
+                  : 'text-muted-foreground  hover:bg-accent hover:text-accent-foreground',
               )}
             >
               <X className="h-4 w-4" />

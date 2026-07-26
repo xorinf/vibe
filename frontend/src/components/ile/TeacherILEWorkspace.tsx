@@ -583,7 +583,7 @@ export function TeacherILEWorkspace({
             variant="ghost"
             onClick={handleSave}
             disabled={saving || !effectiveHtml}
-            className="h-8 gap-1 px-2 text-xs text-muted-foreground  hover:text-slate-900"
+            className="h-8 gap-1 px-2 text-xs text-muted-foreground  hover:text-accent-foreground"
             title="Save the current draft (Ctrl+S)"
             aria-label="Save draft"
           >
@@ -601,7 +601,7 @@ export function TeacherILEWorkspace({
             onClick={handleClose}
             aria-label="Close workspace"
             title="Close"
-            className="h-8 w-8 text-muted-foreground  hover:bg-slate-100 hover:text-slate-900"
+            className="h-8 w-8 text-muted-foreground  hover:bg-accent hover:text-accent-foreground"
           >
             <X className="h-4 w-4" />
           </Button>

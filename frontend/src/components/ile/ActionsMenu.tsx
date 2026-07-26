@@ -166,7 +166,7 @@ export function ActionsMenu({
         onClick={() => setOpen((v) => !v)}
         disabled={isBusy}
         aria-label="Experience actions"
-        className="h-10 gap-1 px-2 text-xs text-muted-foreground  hover:text-slate-900"
+        className="h-10 gap-1 px-2 text-xs text-muted-foreground  hover:text-accent-foreground"
       >
         {isBusy ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -300,8 +300,8 @@ function MenuItem({
         disabled={disabled}
         className={cn(
           'flex min-h-10 w-full items-start gap-2 px-3 py-2 text-left text-sm transition-colors',
-          'hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50',
-          tone === 'danger' && 'text-destructive  hover:bg-rose-50/60',
+          'hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50',
+          tone === 'danger' && 'text-destructive  hover:bg-destructive/15/60',
         )}
       >
         <span

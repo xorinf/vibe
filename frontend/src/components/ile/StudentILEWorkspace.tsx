@@ -140,7 +140,7 @@ export function StudentILEWorkspace() {
               onClick={handleCopyLink}
               aria-label="Copy link"
               title="Copy link"
-              className="text-slate-300 hover:bg-slate-800 hover:text-white"
+              className="text-slate-300 hover:bg-slate-800 hover:text-accent-foreground"
             >
               <Copy className="h-4 w-4" />
             </Button>
@@ -151,7 +151,7 @@ export function StudentILEWorkspace() {
             onClick={handleReload}
             aria-label="Reload experience"
             title="Reload"
-            className="text-slate-300 hover:bg-slate-800 hover:text-white"
+            className="text-slate-300 hover:bg-slate-800 hover:text-accent-foreground"
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -161,7 +161,7 @@ export function StudentILEWorkspace() {
             onClick={handleExit}
             aria-label="Exit experience"
             title="Exit"
-            className="text-slate-300 hover:bg-slate-800 hover:text-white"
+            className="text-slate-300 hover:bg-slate-800 hover:text-accent-foreground"
           >
             <X className="h-4 w-4" />
           </Button>

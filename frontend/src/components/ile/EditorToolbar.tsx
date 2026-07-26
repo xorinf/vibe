@@ -110,7 +110,7 @@ function ToolbarButton({
         'h-7 gap-1 px-2 text-xs whitespace-nowrap',
         active
           ? 'bg-primary/10 text-primary hover:bg-primary/15'
-          : 'text-muted-foreground  hover:text-slate-900',
+          : 'text-muted-foreground  hover:text-accent-foreground',
         disabled && 'opacity-40',
       )}
     >
@@ -182,7 +182,7 @@ function ViewModeButton({
         'inline-flex h-7 w-7 items-center justify-center rounded-sm transition-colors',
         active
           ? 'bg-background  text-primary shadow-sm'
-          : 'text-muted-foreground  hover:text-slate-800',
+          : 'text-muted-foreground  hover:text-accent-foreground',
       )}
       title={target === 'code' ? 'Code only' : target === 'split' ? 'Split view' : 'Preview only'}
       aria-label={target === 'code' ? 'Code only' : target === 'split' ? 'Split view' : 'Preview only'}

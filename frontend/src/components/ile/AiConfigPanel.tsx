@@ -390,10 +390,10 @@ export function AiConfigPanel({
         className={cn(
           'inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
           status.kind === 'connected'
-            ? 'bg-primary/15  text-emerald-800 hover:bg-emerald-100'
+            ? 'bg-primary/15  text-emerald-800 hover:bg-success-soft/20'
             : loading
               ? 'bg-muted  text-muted-foreground '
-              : 'bg-ai/30  text-amber-800 hover:bg-amber-100',
+              : 'bg-ai/30  text-amber-800 hover:bg-warm/20',
           className,
         )}
         aria-label={
@@ -588,7 +588,7 @@ export function AiConfigFormBody({
           <button
             type="button"
             onClick={() => s.setShowKey(!s.showKey)}
-            className="absolute inset-y-0 right-0 flex h-10 items-center px-3 text-muted-foreground/80  hover:text-slate-700"
+            className="absolute inset-y-0 right-0 flex h-10 items-center px-3 text-muted-foreground/80  hover:text-accent-foreground"
             aria-label={s.showKey ? 'Hide API key' : 'Show API key'}
           >
             {s.showKey ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}

@@ -59,7 +59,7 @@ export function AssetAttachments({
         <button
           type="button"
           onClick={onSendToAi}
-          className="ml-auto inline-flex items-center gap-1 rounded-full bg-violet-600 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-violet-700"
+          className="ml-auto inline-flex items-center gap-1 rounded-full bg-violet-600 px-2.5 py-1 text-[10px] font-medium text-white hover:bg-primary/90"
         >
           <Sparkles className="h-3 w-3" /> Reference in next message
         </button>
@@ -82,7 +82,7 @@ function AttachedChip({
         target="_blank"
         rel="noopener noreferrer"
         referrerPolicy="no-referrer"
-        className="inline-flex items-center gap-1 hover:text-violet-700"
+        className="inline-flex items-center gap-1 hover:text-accent-foreground"
       >
         <span className="max-w-[140px] truncate">{asset.filename}</span>
         <ExternalLink className="h-2.5 w-2.5" />
@@ -90,7 +90,7 @@ function AttachedChip({
       <button
         type="button"
         onClick={onRemove}
-        className="rounded-full p-0.5 text-muted-foreground/80  hover:bg-rose-50 hover:text-rose-600"
+        className="rounded-full p-0.5 text-muted-foreground/80  hover:bg-destructive/15 hover:text-destructive/90"
         aria-label={`Remove ${asset.filename}`}
       >
         <X className="h-3 w-3" />

@@ -323,7 +323,7 @@ export function InlineMetadataCluster({
         onChange={(e) => onTitleChange(e.target.value)}
         placeholder="Untitled Experience"
         aria-label="Experience title"
-        className="h-7 w-44 border-transparent bg-transparent px-2 text-sm font-medium text-foreground/90  shadow-none hover:bg-slate-50 focus-visible:bg-white focus-visible:border-slate-200 focus-visible:ring-0"
+        className="h-7 w-44 border-transparent bg-transparent px-2 text-sm font-medium text-foreground/90  shadow-none hover:bg-accent focus-visible:bg-white focus-visible:border-slate-200 focus-visible:ring-0"
       />
       <SaveStatusPill
         saving={saving}
@@ -355,7 +355,7 @@ export function InlineMetadataCluster({
             <Button
               size="sm"
               disabled={!canPublish}
-              className="h-7 gap-1 bg-violet-600 px-2 text-xs hover:bg-violet-700"
+              className="h-7 gap-1 bg-violet-600 px-2 text-xs hover:bg-primary/90"
               aria-label="Published — view student link"
               title="Published — click for student link"
             >
@@ -373,7 +373,7 @@ export function InlineMetadataCluster({
           size="sm"
           onClick={onPublish}
           disabled={!canPublish}
-          className="h-7 gap-1 bg-violet-600 px-2 text-xs hover:bg-violet-700"
+          className="h-7 gap-1 bg-violet-600 px-2 text-xs hover:bg-primary/90"
           aria-label="Publish for students"
           title="Publish for students"
         >

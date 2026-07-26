@@ -269,7 +269,7 @@ export function ChatPane({
                   key={action.id}
                   type="button"
                   onClick={() => handleQuickAction(action.id)}
-                  className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2.5 py-1 text-[11px] font-medium text-foreground/80  transition-colors hover:border-violet-300 hover:bg-violet-50 hover:text-violet-800"
+                  className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2.5 py-1 text-[11px] font-medium text-foreground/80  transition-colors hover:border-primary/40 hover:bg-accent hover:text-accent-foreground"
                 >
                   <Icon className="h-3 w-3" />
                   {action.label}
@@ -357,7 +357,7 @@ export function ChatPane({
                   size="sm"
                   variant="outline"
                   onClick={api.cancel}
-                  className="gap-1 text-destructive/90  hover:bg-rose-50 hover:text-rose-700"
+                  className="gap-1 text-destructive/90  hover:bg-destructive/15 hover:text-destructive"
                 >
                   <Square className="h-3.5 w-3.5" />
                   Cancel
@@ -420,7 +420,7 @@ function Header({
               disabled={!api.canUndo || isStreaming}
               aria-label="Undo last edit"
               title="Undo last edit"
-              className="h-7 w-7 p-0 text-muted-foreground  hover:text-slate-900 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-muted-foreground  hover:text-accent-foreground disabled:opacity-40"
             >
               <Undo2 className="h-3.5 w-3.5" />
             </Button>
@@ -431,7 +431,7 @@ function Header({
               disabled={!api.canRedo || isStreaming}
               aria-label="Redo"
               title="Redo"
-              className="h-7 w-7 p-0 text-muted-foreground  hover:text-slate-900 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-muted-foreground  hover:text-accent-foreground disabled:opacity-40"
             >
               <Redo2 className="h-3.5 w-3.5" />
             </Button>
@@ -443,7 +443,7 @@ function Header({
               disabled={isStreaming}
               aria-label="Retry last prompt"
               title="Resend the most recent user prompt"
-              className="h-7 w-7 p-0 text-muted-foreground  hover:text-slate-900 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-muted-foreground  hover:text-accent-foreground disabled:opacity-40"
             >
               <RotateCcw className="h-3.5 w-3.5" />
             </Button>
@@ -454,7 +454,7 @@ function Header({
               disabled={isStreaming || state.stream.status !== 'done'}
               aria-label="Accept latest version"
               title="Mark the latest version as the new baseline"
-              className="h-7 w-7 p-0 text-primary/90  hover:text-emerald-800 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-primary/90  hover:text-success-strong disabled:opacity-40"
             >
               <Check className="h-3.5 w-3.5" />
             </Button>
@@ -465,7 +465,7 @@ function Header({
               disabled={isStreaming}
               aria-label="Reject latest version"
               title="Revert to the previous version"
-              className="h-7 w-7 p-0 text-destructive/90  hover:text-rose-800 disabled:opacity-40"
+              className="h-7 w-7 p-0 text-destructive/90  hover:text-destructive disabled:opacity-40"
             >
               <X className="h-3.5 w-3.5" />
             </Button>
@@ -580,7 +580,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={onAccept}
-                className="inline-flex items-center gap-1 rounded-full border border-primary/30  bg-primary/15  px-2 py-0.5 text-[10px] font-medium text-primary  transition-colors hover:bg-emerald-100"
+                className="inline-flex items-center gap-1 rounded-full border border-primary/30  bg-primary/15  px-2 py-0.5 text-[10px] font-medium text-primary  transition-colors hover:bg-success-soft/20"
                 title="Mark this version as the new baseline"
               >
                 <Check className="h-2.5 w-2.5" /> Accept
@@ -590,7 +590,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={onReject}
-                className="inline-flex items-center gap-1 rounded-full border border-destructive/30  bg-destructive/15  px-2 py-0.5 text-[10px] font-medium text-destructive  transition-colors hover:bg-rose-100"
+                className="inline-flex items-center gap-1 rounded-full border border-destructive/30  bg-destructive/15  px-2 py-0.5 text-[10px] font-medium text-destructive  transition-colors hover:bg-destructive/20"
                 title="Revert to the previous version"
               >
                 <X className="h-2.5 w-2.5" /> Reject
@@ -600,7 +600,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={onRetry}
-                className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2 py-0.5 text-[10px] font-medium text-foreground/80  transition-colors hover:bg-slate-50"
+                className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2 py-0.5 text-[10px] font-medium text-foreground/80  transition-colors hover:bg-accent"
                 title="Re-send the most recent user prompt"
               >
                 <RotateCcw className="h-2.5 w-2.5" /> Retry
@@ -610,7 +610,7 @@ function MessageBubble({
               <button
                 type="button"
                 onClick={onFork}
-                className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2 py-0.5 text-[10px] font-medium text-foreground/80  transition-colors hover:bg-slate-50"
+                className="inline-flex items-center gap-1 rounded-full border border-border  bg-background  px-2 py-0.5 text-[10px] font-medium text-foreground/80  transition-colors hover:bg-accent"
                 title="Start a new branch from this point"
               >
                 <GitFork className="h-2.5 w-2.5" /> Fork
@@ -669,7 +669,7 @@ function FollowupPrompt({
           size="sm"
           onClick={onSubmit}
           disabled={!value.trim()}
-          className="h-7 bg-violet-600 text-xs hover:bg-violet-700"
+          className="h-7 bg-violet-600 text-xs hover:bg-primary/90"
         >
           Apply
         </Button>

@@ -199,7 +199,7 @@ function SearchInput({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground  hover:bg-slate-100 hover:text-slate-900"
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground  hover:bg-accent hover:text-accent-foreground"
           aria-label="Search"
           title="Search experiences"
         >

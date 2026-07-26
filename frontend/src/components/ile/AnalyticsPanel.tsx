@@ -92,7 +92,7 @@ export function AnalyticsPanel({ experienceId, className }: AnalyticsPanelProps)
               size="sm"
               variant="ghost"
               onClick={refresh}
-              className="ml-2 h-6 text-destructive  hover:bg-rose-100"
+              className="ml-2 h-6 text-destructive  hover:bg-destructive/20"
             >
               Retry
             </Button>

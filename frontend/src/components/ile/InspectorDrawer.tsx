@@ -160,7 +160,7 @@ function InspectorTabStrip({
               'relative flex items-center gap-1.5 border-r border-border  px-3 text-[11px] font-medium transition-colors',
               tab === t.id
                 ? 'bg-background  text-foreground '
-                : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
+                : 'text-muted-foreground  hover:bg-accent hover:text-accent-foreground',
             )}
           >
             {tab === t.id && (
@@ -179,7 +179,7 @@ function InspectorTabStrip({
         onClick={onClose}
         aria-label="Hide inspector"
         title="Hide inspector"
-        className="h-7 w-7 mr-1 text-muted-foreground  hover:text-slate-900"
+        className="h-7 w-7 mr-1 text-muted-foreground  hover:text-accent-foreground"
       >
         <X className="h-3.5 w-3.5" />
       </Button>

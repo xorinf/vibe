@@ -129,7 +129,7 @@ function ActivityBarButton({
         'relative mx-1 flex h-10 w-10 items-center justify-center rounded-md transition-colors',
         active
           ? 'bg-primary/10 text-primary'
-          : 'text-muted-foreground  hover:bg-slate-100 hover:text-slate-900',
+          : 'text-muted-foreground  hover:bg-accent hover:text-accent-foreground',
       )}
     >
       <span

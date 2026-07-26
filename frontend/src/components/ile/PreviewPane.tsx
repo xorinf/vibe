@@ -96,7 +96,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
                 size="sm"
                 variant="ghost"
                 onClick={reload}
-                className="h-7 gap-1 px-2 text-xs text-muted-foreground  hover:text-slate-900"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground  hover:text-accent-foreground"
                 title="Reload preview"
               >
                 <RefreshCw className="h-3.5 w-3.5" />
@@ -106,7 +106,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
                 size="sm"
                 variant="ghost"
                 onClick={enterFullscreen}
-                className="h-7 gap-1 px-2 text-xs text-muted-foreground  hover:text-slate-900"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground  hover:text-accent-foreground"
                 title="Open in fullscreen"
               >
                 <Maximize2 className="h-3.5 w-3.5" />
@@ -194,7 +194,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
             size="sm"
             variant="outline"
             onClick={reload}
-            className="h-6 border-destructive/30  px-2 text-[11px] text-destructive  hover:bg-rose-100"
+            className="h-6 border-destructive/30  px-2 text-[11px] text-destructive  hover:bg-destructive/20"
           >
             Reload
           </Button>

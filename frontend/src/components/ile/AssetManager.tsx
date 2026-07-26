@@ -435,7 +435,7 @@ function AssetCard({
     : `${(asset.size / 1024 / 1024).toFixed(1)} MB`;
 
   return (
-    <li className="group relative overflow-hidden rounded-md border border-border  bg-background  shadow-sm transition-all hover:border-violet-300 hover:shadow-md">
+    <li className="group relative overflow-hidden rounded-md border border-border  bg-background  shadow-sm transition-all hover:border-primary/40 hover:shadow-md">
       <div className="relative h-20 w-full overflow-hidden bg-muted ">
         {thumb ? (
           <img
@@ -454,7 +454,7 @@ function AssetCard({
             href={thumb ?? '#'}
             target="_blank"
             rel="noopener noreferrer"
-            className="absolute right-1.5 top-1.5 hidden rounded-full bg-background  p-1 text-muted-foreground  hover:text-slate-900 group-hover:block"
+            className="absolute right-1.5 top-1.5 hidden rounded-full bg-background  p-1 text-muted-foreground  hover:text-accent-foreground group-hover:block"
             title="Open in new tab"
           >
             <ExternalLink className="h-3 w-3" />
@@ -485,7 +485,7 @@ function AssetCard({
             size="icon"
             variant="ghost"
             onClick={onDelete}
-            className="h-6 w-6 text-muted-foreground/80  hover:bg-rose-50 hover:text-rose-600"
+            className="h-6 w-6 text-muted-foreground/80  hover:bg-destructive/15 hover:text-destructive/90"
             aria-label="Delete"
           >
             <Trash2 className="h-3 w-3" />
