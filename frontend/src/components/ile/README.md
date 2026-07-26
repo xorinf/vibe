@@ -22,7 +22,7 @@ ile/
 ├── AssetAttachments.tsx            # Inline chips for assets riding on next msg
 ├── vibeSdk.ts                     # iframe runtime SDK (string template)
 ├── ileApi.ts                      # REST + SSE + event-type contracts
-├── useIleGeneration.ts            # Transport hook (SSE consumer)
+├── useIleGeneration.ts           # Stream-state type (the hook was removed; see comment in file)
 ├── useIleEditor.ts                 # Editor hook (chat + undo + assets)
 ├── useIleEventReporter.ts          # postMessage analytics flusher
 ├── quickActions.ts                # Quick-action chip registry + label maps
@@ -55,9 +55,11 @@ token from `localStorage`.
 
 ### SSE (teacher → AI)
 
-Same shape as backend README. The hook (`useIleGeneration`) consumes the
-stream and exposes a single state object. The editor hook (`useIleEditor`)
-adds the chat history, undo/redo, and asset-attach concerns on top.
+Same shape as backend README. The editor hook (`useIleEditor`) consumes
+the stream directly via `startEditStream`; `useIleContextGeneration`
+does the same for YouTube-context generation. The shared state object
+for both is `IleStreamState` (defined in `useIleGeneration.ts`, kept
+as a type-only file).
 
 ## Security model
 
