@@ -1,6 +1,7 @@
-import { injectable } from 'inversify';
+import { injectable, inject } from 'inversify';
 import { Collection, ObjectId } from 'mongodb';
 import { MongoDatabase } from '#shared/database/index.js';
+import { GLOBAL_TYPES } from '#root/types.js';
 import { IleAiConfig } from '../services/providers/types.js';
 
 const COLLECTION = 'ile_ai_configs';
@@ -15,7 +16,7 @@ const COLLECTION = 'ile_ai_configs';
  */
 @injectable()
 export class IleAiConfigRepository {
-  constructor(private readonly db: MongoDatabase) {}
+  constructor(@inject(GLOBAL_TYPES.Database) private readonly db: MongoDatabase) {}
 
   private async col(): Promise<Collection<IleAiConfig & { _id: ObjectId; ownerId: string }>> {
     return this.db.getCollection(COLLECTION) as any;
