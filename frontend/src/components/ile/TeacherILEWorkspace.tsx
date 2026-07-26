@@ -321,6 +321,16 @@ export function TeacherILEWorkspace({
     return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, [isDirty]);
 
+  // Surface stream errors as a toast so the teacher doesn't think the
+  // AI is 'still working' forever when the backend rejected the
+  // request (e.g. auth mismatch, validation failure).
+  useEffect(() => {
+    if (editorState.stream.status === 'error' && editorState.stream.error) {
+      toast.error(editorState.stream.error, { duration: 8000 });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorState.stream.status, editorState.stream.error]);
+
   const handleClose = useCallback(() => {
     if (isDirty) {
       const ok = window.confirm('You have unsaved changes. Close anyway?');
@@ -521,6 +531,7 @@ export function TeacherILEWorkspace({
         <div className="ml-auto flex items-center gap-1.5">
           <AiConfigPanel
             mode="chip"
+            key={`chip-${configState}`}
             onRequestEdit={() => setAiConfigOpen(true)}
             onConfiguredChange={(configured) =>
               setConfigState(configured ? 'configured' : 'unconfigured')

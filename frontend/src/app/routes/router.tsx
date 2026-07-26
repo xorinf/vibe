@@ -28,6 +28,7 @@ import CoursePage from '@/app/pages/student/course-page'
 import TeacherCoursePage from "@/app/pages/teacher/teacher-course-page";
 import TeacherCoursesPage from '@/app/pages/teacher/course-page'
 import TeacherILELibraryPage from '@/app/pages/teacher/teacher-ile-library-page'
+import TeacherILEWorkspacePage from '@/app/pages/teacher/teacher-ile-workspace-page'
 import Editor from '@/app/pages/teacher/create-article'
 import { NotFoundComponent } from '@/components/not-found'
 import { useCourseStore } from '@/store/course-store'
@@ -348,6 +349,15 @@ const teacherILELibraryRoute = new Route({
   getParentRoute: () => teacherLayoutRoute,
   path: '/ile',
   component: TeacherILELibraryPage,
+});
+
+// Full-page workspace route -- 'Generate Playground' from the course
+// page's Add Item dropdown navigates here so the teacher gets a
+// dedicated page experience rather than a dialog.
+const teacherILEWorkspaceRoute = new Route({
+  getParentRoute: () => teacherLayoutRoute,
+  path: '/ile/new',
+  component: TeacherILEWorkspacePage,
 });
 
 // Teacher Course Instructors route
@@ -696,6 +706,7 @@ const routeTree = rootRoute.addChildren([
     teacherCourseEnrollmentsRoute,
     teacherCourseEmotionAnalyticsRoute,
     teacherILELibraryRoute,
+    teacherILEWorkspaceRoute,
     teacherAudioManagerRoute,
     teacherAddCourseRoute,
     teacherCourseInviteRoute,

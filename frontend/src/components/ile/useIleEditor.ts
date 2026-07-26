@@ -519,21 +519,33 @@ export function useIleEditor(): UseIleEditorApi {
   // which action the teacher took.
 
   /** Accept: snapshot the current stream.html as the new baseline.
-   * The chat pane is responsible for clearing any diff hints in the
-   * UI. */
+   * Sets previousHtml = current stream.html so any future stream
+   * diffs from the accepted version, and bumps lastAppliedAt so
+   * the workspace can react (e.g. drop the diff banner). */
   const accept = useCallback(() => {
     setStream((s) => {
       if (s.status === 'streaming') return s;
-      return s;
+      return {
+        ...s,
+        previousHtml: s.html,
+        lastAppliedAt: Date.now(),
+      };
     });
   }, []);
 
-  /** Reject: the workspace owns the manualHtml reset; the hook just
-   * signals the rejection so the chat pane can clear UI state. */
+  /** Reject: restore the pre-stream HTML so the workspace shows the
+   * version that was on screen before the AI turn. Falls back to
+   the current stream.html if previousHtml is missing (e.g. on a
+   fresh generation). Bumps lastAppliedAt so the workspace reacts. */
   const reject = useCallback(() => {
     setStream((s) => {
       if (s.status === 'streaming') return s;
-      return s;
+      return {
+        ...s,
+        html: s.previousHtml ?? s.html,
+        previousHtml: undefined,
+        lastAppliedAt: Date.now(),
+      };
     });
   }, []);
 
