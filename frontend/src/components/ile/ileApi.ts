@@ -77,13 +77,20 @@ function openIleSse(
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      if (!res.ok) {
-        // The native EventSource fires onerror on a non-200 with
-        // no body. We replicate that with a synthetic 'error' so
-        // the existing bindIleStream error path kicks in.
-        fire('error', '');
-        return;
-      }
+      // Do NOT bail on !res.ok here. routing-controllers' ExpressDriver
+      // throws `Cannot set headers after they are sent` after a clean
+      // SSE stream (see IleGenerationService.ts and the
+      // sse-post-stream-headers-sent-race-2026-07-26 reference) — the
+      // body has already been flushed with the `done` event, and the
+      // final HTTP status arrives as 500. Bailing here means we never
+      // read the body and the editor hook stays stuck in `'streaming'`
+      // forever (the P1-5 watchdog eventually surfaces an error
+      // message, but the cleaner UX is to let the body's own `done`
+      // event transition the hook normally).
+      //
+      // Surface non-2xx as a synthetic `error` ONLY when the body is
+      // empty / unreadable — that's the genuine "stream never started"
+      // case (validation failure, auth, route 404).
       if (!res.body) {
         fire('error', '');
         return;
