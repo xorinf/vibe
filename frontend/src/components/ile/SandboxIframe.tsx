@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { cn } from '@/utils/utils';
 import {
   IFRAME_MSG_TYPES,
   VIBE_IFRAME_CSP,
@@ -150,7 +151,7 @@ export function SandboxIframe({
   const showOverlay = hasHtml && !loaded;
 
   return (
-    <div className={className}>
+    <div className={cn('h-full w-full', className)}>
       <iframe
         ref={iframeRef}
         key={remountKey}
