@@ -253,7 +253,6 @@ export function TeacherILEWorkspace({
       if (manualHtml === null || manualHtml === streamHtml) {
         editorHandleRef.current?.setValue(streamHtml);
         setManualHtml(null);
-        editor.setHead(streamHtml);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -269,9 +268,8 @@ export function TeacherILEWorkspace({
   const handleCodeChange = useCallback(
     (next: string) => {
       setManualHtml(next);
-      editor.setHead(next);
     },
-    [editor],
+    [],
   );
 
   useEffect(() => {

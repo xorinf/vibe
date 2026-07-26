@@ -9,6 +9,7 @@ import {
 import { resolveInstruction, type QuickActionId } from './quickActions';
 import type { IleStreamState } from './useIleGeneration';
 import type { AttachedAsset } from './AssetAttachments';
+export type { AttachedAsset };
 
 export interface ChatMessage extends IleHistoryTurn {
   /**
@@ -79,12 +80,6 @@ export interface IleEditorState {
    * along on the next `send()` and are then cleared.
    */
   attachedAssets: AttachedAsset[];
-  /**
-   * The HTML the most recently COMPLETED AI turn produced. Cleared
-   * when the teacher manually edits or accepts a different version.
-   * Used by the chat pane's diff view to render a before/after.
-   */
-  lastAppliedHtml?: string;
 }
 
 export type IleEditorApi = UseIleEditorApi;
@@ -101,17 +96,6 @@ export interface UseIleEditorApi {
    * setExperience() is called.
    */
   setFreshCanvas: (ctx: { courseId: string; courseVersionId: string; itemId?: string }) => void;
-  /**
-   * Push a new head value into the editor WITHOUT resetting undo/redo
-   * or history. Used by the workspace when the teacher types in the
-   * code editor — the AI edit path needs to see the latest manual
-   * content as its base, but we don't want to drop the undo stack.
-   *
-   * The chat message that "Reverted to the previous version" still
-   * uses the canonical undo/redo; this method is only for keeping
-   * `headHtmlRef.current` in sync with the workspace's editor state.
-   */
-  setHead: (html: string) => void;
   /**
    * Send a free-form edit. If the editor is in freshCanvas mode this
    * runs the create path; otherwise it runs the edit path.
@@ -135,6 +119,12 @@ export interface UseIleEditorApi {
   undo: () => void;
   /** Re-apply a previously-undone edit. No-op when the redo stack is empty. */
   redo: () => void;
+  /**
+   * Writer-side access to the latest-user-prompt ref. The chat pane
+   * calls this on every submit so retry() always has a fresh string
+   * to resend.
+   */
+  setLatestRetryPrompt: (prompt: string) => void;
   /** Attach an asset to the next `send()`. Multiple calls dedupe by id. */
   attachAsset: (asset: AttachedAsset) => void;
   /** Remove a single attached asset. */
@@ -143,13 +133,13 @@ export interface UseIleEditorApi {
   clearAttachedAssets: () => void;
   /**
    * Accept the most recent AI turn. The current `stream.html` becomes
-   * the new baseline (the diff is dropped). No-op while streaming.
+   * the new baseline. No-op while streaming.
    */
   accept: () => void;
   /**
-   * Reject the most recent AI turn. Restores `lastAppliedHtml` (or the
-   * pre-stream baseline) into the editor's `manualHtml` so the
-   * teacher sees the previous version again. No-op while streaming.
+   * Reject the most recent AI turn. The chat pane wires the
+   * manualHtml restore itself; this hook just signals the rejection.
+   * No-op while streaming.
    */
   reject: () => void;
   /**
@@ -252,15 +242,10 @@ export function useIleEditor(): UseIleEditorApi {
   );
 
   // ───────────────────────────────────────────────────────────────────
-  // setHead: sync the AI's "base" HTML with whatever the teacher just
-  // typed in the code editor. We don't reset undo/redo or history here
-  // — the AI's undo stack is independent of the editor's. We also don't
-  // touch the stream state (status / progress / messages) because the
-  // teacher is still mid-typing; the next AI send() will read from
-  // the updated head.
-  const setHead = useCallback((html: string) => {
-    headHtmlRef.current = html;
-  }, []);
+  // setFreshCanvas: switch the editor into fresh-canvas mode so the
+  // next send() runs through generate() (the create path) instead of
+  // edit(). Called by the workspace on mount of a brand-new
+  // experience.
   const setFreshCanvas = useCallback(
     (ctx: { courseId: string; courseVersionId: string; itemId?: string }) => {
       setCourseId(ctx.courseId);
@@ -530,25 +515,25 @@ export function useIleEditor(): UseIleEditorApi {
   //
   // These four operations form the "version control" surface of the
   // chat. They all read/write through the same `headHtmlRef` and
-  // `messages` state so the diff view in ChatPane has consistent
-  // before/after snapshots regardless of which action the teacher took.
+  // `messages` state so the preview stays consistent regardless of
+  // which action the teacher took.
 
-  /** Accept: snapshot the current stream.html as the new baseline. */
+  /** Accept: snapshot the current stream.html as the new baseline.
+   * The chat pane is responsible for clearing any diff hints in the
+   * UI. */
   const accept = useCallback(() => {
     setStream((s) => {
       if (s.status === 'streaming') return s;
-      return { ...s, lastAppliedHtml: s.html };
+      return s;
     });
   }, []);
 
-  /** Reject: restore the pre-stream baseline into manualHtml-equivalent.
-   * We don't have access to the workspace's `setManualHtml` from
-   * here, so the chat pane wires `reject` itself and just clears
-   * the applied flag. */
+  /** Reject: the workspace owns the manualHtml reset; the hook just
+   * signals the rejection so the chat pane can clear UI state. */
   const reject = useCallback(() => {
     setStream((s) => {
       if (s.status === 'streaming') return s;
-      return { ...s, lastAppliedHtml: undefined };
+      return s;
     });
   }, []);
 
@@ -672,6 +657,17 @@ export function useIleEditor(): UseIleEditorApi {
   }, []);
 
   // ───────────────────────────────────────────────────────────────────
+  // P1-4: clear the cancelRef on terminal stream states so the
+  // polyfill's onerror retry path (which checks cancelRef.current)
+  // can no-op once the server has confirmed done or error. The
+  // connection itself is closed by bindIleStream (ileApi.ts).
+  useEffect(() => {
+    if (stream.status === 'done' || stream.status === 'error') {
+      cancelRef.current = null;
+    }
+  }, [stream.status]);
+
+  // ───────────────────────────────────────────────────────────────────
   // Cancellation on unmount
   useEffect(() => {
     return () => {
@@ -697,7 +693,6 @@ export function useIleEditor(): UseIleEditorApi {
     },
     setExperience,
     setFreshCanvas,
-    setHead,
     send,
     sendAsEdit,
     sendAsGenerate,
