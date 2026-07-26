@@ -1,4 +1,4 @@
-import { useRef, useState, type Ref } from 'react';
+import { useRef, useState, Component, type ReactNode, type Ref } from 'react';
 import { Code } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
@@ -13,6 +13,36 @@ import {
 } from 'react-resizable-panels';
 
 export type { ViewMode };
+
+/**
+ * ErrorBoundary for the CodeMirror editor. The HTML syntax-highlighting
+ * parser occasionally throws "Cannot read properties of undefined
+ * (reading 'length')" mid-stream when the AI is emitting partial
+ * tags — without this boundary the crash takes down the entire
+ * ILE workspace (the global router error boundary is too coarse
+ * for this and the user loses chat + preview along with the
+ * editor). The boundary swaps the editor for a plain <pre> of
+ * the same code so the workspace keeps functioning.
+ */
+class CodeEditorErrorBoundary extends Component<
+  { children: ReactNode; fallback: (err: Error) => ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error) {
+    // eslint-disable-next-line no-console
+    console.warn('[ILE] CodeEditor crashed, falling back to plain <pre>:', error);
+  }
+  render() {
+    if (this.state.error) {
+      return this.props.fallback(this.state.error);
+    }
+    return this.props.children;
+  }
+}
 
 export interface EditorSplitPaneProps {
   /**
@@ -128,24 +158,32 @@ export function EditorSplitPane({
             <div className="flex h-full min-h-0 flex-col bg-white">
               <SourceSubHeader isStreaming={isStreaming} />
               <div className="min-h-0 flex-1">
-                <CodeEditor
-                  value={effectiveHtml}
-                  onChange={onCodeChange}
-                  wordWrap={wordWrap}
-                  readOnly={isStreaming}
-                  handleRef={(handle) => {
-                    localHandleRef.current = handle;
-                    editorRef.current = handle;
-                    if (typeof editorHandleRef === 'function') {
-                      editorHandleRef(handle);
-                    } else if (editorHandleRef) {
-                      (editorHandleRef as { current: CodeEditorHandle | null }).current =
-                        handle;
-                    }
-                  }}
-                  className="h-full w-full overflow-auto"
-                  aria-label="Experience HTML source"
-                />
+                <CodeEditorErrorBoundary
+                  fallback={() => (
+                    <pre className="h-full w-full overflow-auto whitespace-pre-wrap break-all bg-slate-50 p-3 font-mono text-xs text-slate-700">
+                      <code>{effectiveHtml}</code>
+                    </pre>
+                  )}
+                >
+                  <CodeEditor
+                    value={effectiveHtml}
+                    onChange={onCodeChange}
+                    wordWrap={wordWrap}
+                    readOnly={isStreaming}
+                    handleRef={(handle) => {
+                      localHandleRef.current = handle;
+                      editorRef.current = handle;
+                      if (typeof editorHandleRef === 'function') {
+                        editorHandleRef(handle);
+                      } else if (editorHandleRef) {
+                        (editorHandleRef as { current: CodeEditorHandle | null }).current =
+                          handle;
+                      }
+                    }}
+                    className="h-full w-full overflow-auto"
+                    aria-label="Experience HTML source"
+                  />
+                </CodeEditorErrorBoundary>
               </div>
             </div>
           </Panel>
@@ -174,24 +212,32 @@ export function EditorSplitPane({
             >
               <SourceSubHeader isStreaming={isStreaming} />
               <div className="min-h-0 flex-1">
-                <CodeEditor
-                  value={effectiveHtml}
-                  onChange={onCodeChange}
-                  wordWrap={wordWrap}
-                  readOnly={isStreaming}
-                  handleRef={(handle) => {
-                    localHandleRef.current = handle;
-                    editorRef.current = handle;
-                    if (typeof editorHandleRef === 'function') {
-                      editorHandleRef(handle);
-                    } else if (editorHandleRef) {
-                      (editorHandleRef as { current: CodeEditorHandle | null }).current =
-                        handle;
-                    }
-                  }}
-                  className="h-full w-full overflow-auto"
-                  aria-label="Experience HTML source"
-                />
+                <CodeEditorErrorBoundary
+                  fallback={() => (
+                    <pre className="h-full w-full overflow-auto whitespace-pre-wrap break-all bg-slate-50 p-3 font-mono text-xs text-slate-700">
+                      <code>{effectiveHtml}</code>
+                    </pre>
+                  )}
+                >
+                  <CodeEditor
+                    value={effectiveHtml}
+                    onChange={onCodeChange}
+                    wordWrap={wordWrap}
+                    readOnly={isStreaming}
+                    handleRef={(handle) => {
+                      localHandleRef.current = handle;
+                      editorRef.current = handle;
+                      if (typeof editorHandleRef === 'function') {
+                        editorHandleRef(handle);
+                      } else if (editorHandleRef) {
+                        (editorHandleRef as { current: CodeEditorHandle | null }).current =
+                          handle;
+                      }
+                    }}
+                    className="h-full w-full overflow-auto"
+                    aria-label="Experience HTML source"
+                  />
+                </CodeEditorErrorBoundary>
               </div>
             </div>
           )}
