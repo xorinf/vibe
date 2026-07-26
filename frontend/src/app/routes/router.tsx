@@ -27,6 +27,7 @@ import { AudioTranscripter } from '@/app/pages/teacher/AudioTranscripter'
 import CoursePage from '@/app/pages/student/course-page'
 import TeacherCoursePage from "@/app/pages/teacher/teacher-course-page";
 import TeacherCoursesPage from '@/app/pages/teacher/course-page'
+import TeacherILELibraryPage from '@/app/pages/teacher/teacher-ile-library-page'
 import Editor from '@/app/pages/teacher/create-article'
 import { NotFoundComponent } from '@/components/not-found'
 import { useCourseStore } from '@/store/course-store'
@@ -337,6 +338,16 @@ const teacherCourseEmotionAnalyticsRoute = new Route({
   getParentRoute: () => teacherLayoutRoute,
   path: '/courses/emotion-analytics',
   component: CourseEmotionAnalyticsPage,
+});
+
+// ILE library page — full-page ExperienceList for browsing every
+// experience the teacher has authored. The workspace still opens
+// in-place as a Dialog (same component the course page mounts), so
+// the teacher never leaves the page they're on.
+const teacherILELibraryRoute = new Route({
+  getParentRoute: () => teacherLayoutRoute,
+  path: '/ile',
+  component: TeacherILELibraryPage,
 });
 
 // Teacher Course Instructors route
@@ -684,6 +695,7 @@ const routeTree = rootRoute.addChildren([
     teacherProfileRoute,
     teacherCourseEnrollmentsRoute,
     teacherCourseEmotionAnalyticsRoute,
+    teacherILELibraryRoute,
     teacherAudioManagerRoute,
     teacherAddCourseRoute,
     teacherCourseInviteRoute,

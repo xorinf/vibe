@@ -501,9 +501,13 @@ export interface ExperienceAnalytics {
   studentsCompleted: number;
   completionRate: number;
   averageTimeActiveMs: number;
+  errorRate: number;
+  difficultyScore: number;
+  averageEngagementPerMinute: number;
   averageProgressPct: number;
   totalInteractions: number;
   totalErrors: number;
+  totalRetries: number;
   students: {
     studentHash: string;
     startedAt: string;
@@ -514,9 +518,19 @@ export interface ExperienceAnalytics {
     interactionCount: number;
     errorCount: number;
     resumeCount: number;
+    retryCount: number;
+    resumePoint?: { percent?: number; at: string; label?: string | null };
     events: { kind: IleStudentEventKind; clientTs: number; data?: unknown; receivedAt: string }[];
   }[];
 }
+
+export interface AnalyticsBucket {
+  date: string; studentsStarted: number; studentsCompleted: number; errors: number;
+  retries: number; resumes: number; averageTimeActiveMs: number;
+}
+export interface TimeSeriesAnalytics { experienceId: string; from: string; to: string; bucket: 'day'; series: AnalyticsBucket[]; }
+export interface DropOffCurve { experienceId: string; bins: { pct: number; reachedBy: number; total: number }[]; largestDrop: { fromPct: number; toPct: number; magnitude: number }; }
+export interface AnalyticsInsight { id: string; severity: 'info' | 'warning' | 'critical'; title: string; body: string; scope: { progressFrom: number; progressTo: number }; suggestion: string; }
 
 export interface DashboardAnalytics {
   perExperience: ExperienceAnalytics[];
@@ -595,6 +609,23 @@ export async function getIleAnalyticsDashboard(
     `/interactive-experiences/analytics/dashboard?ids=${qs}`,
   );
 }
+
+export interface CompareAnalytics {
+  a: ExperienceAnalytics;
+  b: ExperienceAnalytics;
+  delta: { completionRate: number; averageTimeActiveMs: number; errorRate: number; difficultyScore: number; averageEngagementPerMinute: number };
+}
+
+export async function getIleTimeSeries(experienceId: string, opts: { from?: string; to?: string; days?: number } = { days: 30 }): Promise<TimeSeriesAnalytics> {
+  const qs = new URLSearchParams();
+  if (opts.from) qs.set('from', opts.from);
+  if (opts.to) qs.set('to', opts.to);
+  if (opts.days !== undefined) qs.set('days', String(opts.days));
+  return getJson<TimeSeriesAnalytics>(`/interactive-experiences/${experienceId}/analytics/timeseries${qs.toString() ? `?${qs}` : ''}`);
+}
+export async function getIleDropOff(experienceId: string): Promise<DropOffCurve> { return getJson<DropOffCurve>(`/interactive-experiences/${experienceId}/analytics/dropoff`); }
+export async function getIleInsights(experienceId: string): Promise<AnalyticsInsight[]> { return getJson<AnalyticsInsight[]>(`/interactive-experiences/${experienceId}/analytics/insights`); }
+export async function getIleCompare(experienceId: string, compareTo: string): Promise<CompareAnalytics> { return getJson<CompareAnalytics>(`/interactive-experiences/analytics/compare?a=${encodeURIComponent(experienceId)}&b=${encodeURIComponent(compareTo)}`); }
 
 // ─────────────────────────────────────────────────────────────────────
 // AI Configuration (ILE-scoped)
