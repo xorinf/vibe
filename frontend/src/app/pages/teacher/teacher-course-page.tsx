@@ -63,6 +63,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/utils/utils";
 import { QuestionUploadDialog } from "@/components/question-upload-dialog";
+import { IleWorkspaceDialog } from "@/components/ile/IleWorkspaceDialog";
 import ConfirmationModal from "./components/confirmation-modal";
 import { useMatches, Link } from "@tanstack/react-router";
 import {
@@ -470,6 +471,18 @@ function TeacherCourseContent() {
     sectionId: string;
   } | null>(null);
   const [quizCsvDialogOpen, setQuizCsvDialogOpen] = useState(false);
+
+  // ILE (Interactive Playground) workspace dialog state.
+  // When the teacher picks "Interactive Playground" from the Add Item
+  // dropdown, we capture the course/section context, open the dialog,
+  // and let the workspace handle the rest (no course-item API call --
+  // ILEs live in their own interactive_experiences collection).
+  const [ileWorkspaceOpen, setIleWorkspaceOpen] = useState(false);
+  const [ileCourseContext, setIleCourseContext] = useState<{
+    courseId: string;
+    courseVersionId: string;
+    itemId?: string;
+  } | null>(null);
 
 
   const updateItemOptional = useUpdateItemOptional();
@@ -2267,6 +2280,16 @@ function TeacherCourseContent() {
                                                       setActiveSectionInfo({ moduleId: module.moduleId, sectionId: section.sectionId });
                                                       setShowCSVUpload(true);
                                                     }
+                                                    else if (type === "ile") {
+                                                      // Open the ILE workspace dialog instead of creating a course
+                                                      // item -- ILEs live in the interactive_experiences collection.
+                                                      setIleCourseContext({
+                                                        courseId: courseId || "",
+                                                        courseVersionId: versionId || "",
+                                                        itemId: section.sectionId,
+                                                      });
+                                                      setIleWorkspaceOpen(true);
+                                                    }
                                                     else {
                                                       setActiveSectionInfo({ moduleId: module.moduleId, sectionId: section.sectionId });
                                                       handleAddItem(module.moduleId, section.sectionId, type);
@@ -2299,6 +2322,7 @@ function TeacherCourseContent() {
                                                   {hasExistingProject ? 'Project (Limit 1 per course)' : 'Project'}
                                                 </option>
                                                 <option value="csv_upload">Upload CSV</option>
+                                                <option value="ile">Interactive Playground</option>
 
                                               </select>
                                               <TooltipProvider>
@@ -3633,6 +3657,12 @@ function TeacherCourseContent() {
         />
       )}
 
+      <IleWorkspaceDialog
+        open={ileWorkspaceOpen}
+        onOpenChange={setIleWorkspaceOpen}
+        experienceId={undefined}
+        defaults={ileCourseContext ?? undefined}
+      />
     </ResizablePanelGroup>
   );
 }
