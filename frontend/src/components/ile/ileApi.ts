@@ -802,8 +802,16 @@ export function streamIleGeneration(
   bind('error', 'error');
 
   es.onerror = (err) => {
-    // Polyfill auto-reconnects; treat as soft unless we get an error event.
+    // The EventSource polyfill treats connection failures as 'soft' and
+    // auto-reconnects. But the in-flight hook stays in 'streaming' state
+    // until an explicit 'error' or 'done' SSE event fires, so a connection
+    // failure that the polyfill never recovers from leaves the workspace
+    // showing 'Streaming…' forever. Surface it as a synthetic
+    // error event so the hook transitions out of 'streaming' and the
+    // teacher sees the real reason in a toast (handled in
+    // TeacherILEWorkspace's stream.error useEffect).
     console.warn('[ILE] SSE reconnecting…', err);
+    onEvent({ kind: 'error', message: 'Stream connection lost. Check the network and retry.' });
   };
 
   return () => es.close();
@@ -848,7 +856,16 @@ export function streamIleEdit(
   bind('error', 'error');
 
   es.onerror = (err) => {
+    // The EventSource polyfill treats connection failures as 'soft' and
+    // auto-reconnects. But the in-flight hook stays in 'streaming' state
+    // until an explicit 'error' or 'done' SSE event fires, so a connection
+    // failure that the polyfill never recovers from leaves the workspace
+    // showing 'Streaming…' forever. Surface it as a synthetic
+    // error event so the hook transitions out of 'streaming' and the
+    // teacher sees the real reason in a toast (handled in
+    // TeacherILEWorkspace's stream.error useEffect).
     console.warn('[ILE] SSE reconnecting…', err);
+    onEvent({ kind: 'error', message: 'Stream connection lost. Check the network and retry.' });
   };
 
   return () => es.close();
@@ -904,7 +921,11 @@ export function streamIleGenerationFromContext(
   bind('error', 'error');
 
   es.onerror = (err) => {
-    console.warn('[ILE] context SSE reconnecting...', err);
+    // See streamIleGeneration for the rationale. Surface connection
+    // failures to the hook so the workspace can drop the 'Streaming…'
+    // spinner instead of hanging forever.
+    console.warn('[ILE] context SSE reconnecting…', err);
+    onEvent({ kind: 'error', message: 'Context stream connection lost. Check the network and retry.' });
   };
 
   return () => es.close();
