@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Eye, RefreshCw, Maximize2, AlertTriangle } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Eye, RefreshCw, Maximize2, Minimize2, X, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SandboxIframe } from './SandboxIframe';
 import { cn } from '@/utils/utils';
@@ -25,6 +25,8 @@ export interface PreviewPaneProps {
 export function PreviewPane({ state, className }: PreviewPaneProps) {
   const [remountKey, setRemountKey] = useState(0);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const fullscreenRef = useRef<HTMLDivElement | null>(null);
 
   const hasHtml = Boolean(state.html?.trim());
   const showOverlay = state.status === 'streaming';
@@ -36,20 +38,46 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
     if (state.status === 'streaming') setRuntimeError(null);
   }, [state.status === 'streaming' ? 0 : 1, state.status]);
 
+  // Track whether the preview is currently in fullscreen so we can
+  // render an in-frame Exit button. The fullscreenchange event fires
+  // on the document whenever ANY element enters or leaves fullscreen
+  // — we filter to our own container so other fullscreen surfaces
+  // (the chat AI settings dialog, the code editor) don't confuse us.
+  useEffect(() => {
+    function onFullscreenChange() {
+      setIsFullscreen(
+        document.fullscreenElement === fullscreenRef.current,
+      );
+    }
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+    };
+  }, []);
+
   const reload = useCallback(() => {
     setRuntimeError(null);
     setRemountKey((v) => v + 1);
   }, []);
 
-  const fullscreen = useCallback(() => {
-    const iframe = document.querySelector<HTMLIFrameElement>(
-      'iframe[title="Interactive Experience preview"]',
-    );
-    if (!iframe) return;
-    iframe.requestFullscreen?.().catch(() => {
-      // Fullscreen denied — silently fall back. The teacher still has the
-      // preview in the workspace.
+  // Fullscreen the entire preview container (not just the iframe)
+  // so the floating Exit button at the top-right stays visible while
+  // in fullscreen. Esc still works natively as a backup.
+  const enterFullscreen = useCallback(() => {
+    const el = fullscreenRef.current;
+    if (!el) return;
+    el.requestFullscreen?.().catch(() => {
+      // Fullscreen denied — silently fall back. The teacher still has
+      // the preview in the workspace.
     });
+  }, []);
+
+  const exitFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.().catch(() => {
+        // Already exited or denied — nothing to do.
+      });
+    }
   }, []);
 
   return (
@@ -77,7 +105,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={fullscreen}
+                onClick={enterFullscreen}
                 className="h-7 gap-1 px-2 text-xs text-slate-500 hover:text-slate-900"
                 title="Open in fullscreen"
               >
@@ -89,65 +117,89 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
         </div>
       </div>
 
-      {/* Body */}
-      <div className="relative flex-1 overflow-hidden p-3">
-        <div className="relative h-full w-full overflow-hidden rounded-lg border bg-white shadow-sm">
-          {hasHtml ? (
-            // Teacher-side preview: do NOT inject the runtime SDK. This
-            // preview is for inspecting generated HTML, not for analytics
-            // — any vibe.interact() / vibe.progress() calls here would
-            // pollute student metrics (or, worse, fire from a teacher
-            // session). experienceId is undefined explicitly so the
-            // payload can't accidentally be attributed to a real id.
-            <SandboxIframe
-              html={state.html}
-              remountKey={remountKey}
-              injectSdk={false}
-              experienceId={undefined}
-              onError={(msg) => setRuntimeError(msg)}
-            />
-          ) : (
-            <EmptyPreview />
-          )}
+      {/* Body — fullscreenRef is what we put into fullscreen so the
+          floating Exit button (rendered while fullscreen is true)
+          stays visible inside the fullscreen viewport. */}
+      <div
+        ref={fullscreenRef}
+        className="relative flex-1 overflow-hidden bg-slate-900/5"
+      >
+        <div className="h-full w-full p-3">
+          <div className="relative h-full w-full overflow-hidden rounded-lg border bg-white shadow-sm">
+            {hasHtml ? (
+              // Teacher-side preview: do NOT inject the runtime SDK. This
+              // preview is for inspecting generated HTML, not for analytics
+              // — any vibe.interact() / vibe.progress() calls here would
+              // pollute student metrics (or, worse, fire from a teacher
+              // session). experienceId is undefined explicitly so the
+              // payload can't accidentally be attributed to a real id.
+              <SandboxIframe
+                html={state.html}
+                remountKey={remountKey}
+                injectSdk={false}
+                experienceId={undefined}
+                onError={(msg) => setRuntimeError(msg)}
+              />
+            ) : (
+              <EmptyPreview />
+            )}
 
-          {/* Streaming-progress pill — shows the size of the new artifact
-              as it streams in. Sits under the (preserved) preview. */}
-          {showOverlay && (
-            <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 text-xs text-slate-700 shadow-sm ring-1 ring-slate-200">
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
-              {state.reasoning ? 'Thinking…' : 'Editing…'}
-              <span className="text-slate-400">
-                {(state.html.length / 1024).toFixed(1)} KB
-              </span>
-            </div>
-          )}
-
-          {/* Soft dim overlay while streaming so the user can still see
-              the previous artifact behind the incoming changes. */}
-          {showOverlay && state.html && (
-            <div className="pointer-events-none absolute inset-0 rounded-lg bg-white/15" />
-          )}
-
-          {/* Runtime error banner (uncaught JS in the sandbox) */}
-          {runtimeError && (
-            <div className="absolute left-3 right-3 top-3 flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 shadow-sm">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <div className="flex-1 space-y-1">
-                <p className="font-medium">Sandbox runtime error</p>
-                <p className="font-mono text-[11px] text-rose-700">{runtimeError}</p>
+            {/* Streaming-progress pill — shows the size of the new artifact
+                as it streams in. Sits under the (preserved) preview. */}
+            {showOverlay && (
+              <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-white/95 px-3 py-1.5 text-xs text-slate-700 shadow-sm ring-1 ring-slate-200">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
+                {state.reasoning ? 'Thinking…' : 'Editing…'}
+                <span className="text-slate-400">
+                  {(state.html.length / 1024).toFixed(1)} KB
+                </span>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={reload}
-                className="h-6 border-rose-200 px-2 text-[11px] text-rose-700 hover:bg-rose-100"
+            )}
+
+            {/* Soft dim overlay while streaming so the user can still see
+                the previous artifact behind the incoming changes. */}
+            {showOverlay && state.html && (
+              <div className="pointer-events-none absolute inset-0 rounded-lg bg-white/15" />
+            )}
+
+            {/* Fullscreen Exit button — only shown while the preview
+                container is the active fullscreen element. Esc still
+                works natively as a backup, but in-app fullscreen hides
+                the workspace toolbar, so the user needs an in-frame
+                affordance to come back. */}
+            {isFullscreen && (
+              <button
+                type="button"
+                onClick={exitFullscreen}
+                className="absolute right-4 top-4 z-50 inline-flex items-center gap-1.5 rounded-full bg-slate-900/85 px-3.5 py-2 text-xs font-medium text-white shadow-lg ring-1 ring-white/20 backdrop-blur transition-colors hover:bg-slate-900"
+                title="Back to workspace (Esc)"
               >
-                Reload
-              </Button>
-            </div>
-          )}
+                <X className="h-3.5 w-3.5" />
+                Back to workspace
+              </button>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* Runtime error banner (uncaught JS in the sandbox) */}
+      {runtimeError && (
+        <div className="absolute left-3 right-3 top-3 flex items-start gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 shadow-sm">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div className="flex-1 space-y-1">
+            <p className="font-medium">Sandbox runtime error</p>
+            <p className="font-mono text-[11px] text-rose-700">{runtimeError}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={reload}
+            className="h-6 border-rose-200 px-2 text-[11px] text-rose-700 hover:bg-rose-100"
+          >
+            Reload
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
