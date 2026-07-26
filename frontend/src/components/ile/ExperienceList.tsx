@@ -22,8 +22,6 @@ export interface ExperienceListProps {
   onOpen: (id: string) => void;
   /** Optional callback for "new experience" — same dialog owner. */
   onCreate?: () => void;
-  /** When true, show archived items too. */
-  includeArchived?: boolean;
   className?: string;
 }
 
@@ -39,23 +37,18 @@ export interface ExperienceListProps {
 export function ExperienceList({
   onOpen,
   onCreate,
-  includeArchived: initialArchived = false,
   className,
 }: ExperienceListProps) {
   const [items, setItems] = useState<IleExperienceListItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [includeArchived, setIncludeArchived] = useState(initialArchived);
   const [query, setQuery] = useState('');
   const cancelledRef = useRef(false);
-  const [statusFilter, setStatusFilter] = useState<
-    'all' | 'draft' | 'published' | 'archived'
-  >('all');
 
   const refresh = useCallback(async () => {
     if (cancelledRef.current) return;
     setLoading(true);
     try {
-      const res = await listIleExperiences({ includeArchived });
+      const res = await listIleExperiences({ includeArchived: true });
       if (cancelledRef.current) return;
       setItems(res.experiences);
     } catch (err: unknown) {
@@ -64,7 +57,7 @@ export function ExperienceList({
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
-  }, [includeArchived]);
+  }, []);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -75,7 +68,6 @@ export function ExperienceList({
   }, [refresh]);
 
   const filtered = items.filter((e) => {
-    if (statusFilter !== 'all' && e.status !== statusFilter) return false;
     if (query.trim()) {
       return e.title.toLowerCase().includes(query.trim().toLowerCase());
     }
@@ -100,65 +92,45 @@ export function ExperienceList({
 
   return (
     <div className={cn('flex h-full flex-col bg-slate-50', className)}>
-      {/* Header */}
-      <div className="border-b bg-white px-5 py-3">
+      {/* Header — one big "Create new experience" button is the primary
+          action. The "Manage every experience you've authored" copy
+          makes the purpose explicit. The search is collapsed into a
+          small icon button at the right that expands to a full input
+          when activated — most lists are short, so the input taking up
+          half the toolbar width was wasted real estate. The global
+          status filter and "Show archived" toggle were overbuilt: the
+          same controls exist per-card via the Actions menu (Archive /
+          Unarchive), so the user doesn't need them at the top. */}
+      <div className="border-b bg-white px-5 py-4">
         <div className="flex items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h1 className="flex items-center gap-2 text-base font-semibold text-slate-900">
               <Sparkles className="h-4 w-4 text-primary" />
               Interactive Learning Experiences
             </h1>
-            <p className="text-xs text-slate-500">
-              Manage every experience you've authored — drafts, published, archived.
+            <p className="mt-0.5 text-xs text-slate-500">
+              Every experience you've authored — drafts, published, archived.
             </p>
           </div>
-          <Button
-            size="lg"
-            onClick={createNew}
-            className="gap-1 bg-primary hover:bg-primary/90"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New experience
-          </Button>
-        </div>
-
-        {/* Filters */}
-        <div className="mt-3 flex items-center gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by title…"
-              className="w-full rounded-md border border-slate-300 bg-white py-1.5 pl-8 pr-3 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
-            />
+          <div className="flex items-center gap-2">
+            {items.length > 3 && (
+              <SearchInput value={query} onChange={setQuery} />
+            )}
+            <Button
+              size="lg"
+              onClick={createNew}
+              className="gap-1 bg-primary hover:bg-primary/90"
+              data-testid="ile-new-experience"
+            >
+              <Plus className="h-4 w-4" />
+              New experience
+            </Button>
           </div>
-          <select
-            value={statusFilter}
-            onChange={(e) =>
-              setStatusFilter(e.target.value as typeof statusFilter)
-            }
-            className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
-          >
-            <option value="all">All statuses</option>
-            <option value="draft">Drafts</option>
-            <option value="published">Published</option>
-            <option value="archived">Archived</option>
-          </select>
-          <label className="flex items-center gap-1.5 text-xs text-slate-600">
-            <input
-              type="checkbox"
-              checked={includeArchived}
-              onChange={(e) => setIncludeArchived(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-slate-300"
-            />
-            Show archived
-          </label>
         </div>
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto px-5 py-3">
+      <div className="flex-1 overflow-y-auto px-5 py-4">
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-20 text-sm text-slate-500">
             <Loader2 className="h-4 w-4 animate-spin" />
@@ -167,9 +139,16 @@ export function ExperienceList({
         ) : items.length === 0 ? (
           <EmptyState onCreate={createNew} />
         ) : filtered.length === 0 ? (
-          <p className="py-12 text-center text-sm text-slate-500">
-            No experiences match the current filters.
-          </p>
+          <div className="py-12 text-center text-sm text-slate-500">
+            <p>No experiences match "{query}".</p>
+            <button
+              type="button"
+              onClick={() => setQuery('')}
+              className="mt-2 text-xs font-medium text-primary hover:underline"
+            >
+              Clear search
+            </button>
+          </div>
         ) : (
           <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
             {filtered.map((e) => (
@@ -186,6 +165,51 @@ export function ExperienceList({
   );
 }
 
+/**
+ * Small, dismissible search field. Renders as a magnifying-glass
+ * icon button when empty; expands to a real input when the user
+ * clicks or starts typing. Saves toolbar real estate on the common
+ * "I have a handful of experiences" case.
+ */
+function SearchInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const [open, setOpen] = useState(Boolean(value));
+  return (
+    <div className="flex items-center">
+      {open ? (
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+          <input
+            autoFocus
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onBlur={() => {
+              if (!value) setOpen(false);
+            }}
+            placeholder="Search by title…"
+            className="w-56 rounded-md border border-slate-300 bg-white py-1.5 pl-8 pr-3 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+          aria-label="Search"
+          title="Search experiences"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ExperienceCard({
   item,
   onOpen,
@@ -196,53 +220,55 @@ function ExperienceCard({
   const updated = new Date(item.updatedAt);
   const archived = item.status === 'archived';
   return (
-    <li
-      className={cn(
-        'group flex flex-col rounded-lg border bg-white p-4 shadow-sm transition-all hover:shadow-md',
-        archived ? 'border-slate-200 opacity-75' : 'border-slate-200 hover:border-primary/30',
-      )}
-    >
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">
-          {item.title || 'Untitled Experience'}
-        </h3>
-        <StatusBadge status={item.status} />
-      </div>
-
-      <dl className="mt-3 space-y-1 text-[11px] text-slate-500">
-        <div className="flex items-center justify-between">
-          <dt>Version</dt>
-          <dd className="font-mono text-slate-700">v{item.currentVersion}</dd>
-        </div>
-        <div className="flex items-center justify-between">
-          <dt>Updated</dt>
-          <dd>{updated.toLocaleDateString()}</dd>
-        </div>
-        {item.authorName && (
-          <div className="flex items-center justify-between">
-            <dt>Author</dt>
-            <dd className="truncate text-slate-700">{item.authorName}</dd>
-          </div>
+    <li>
+      {/* The whole card is a single button — clicking anywhere on it
+          opens the experience, with the chevron and "Open" label
+          reinforcing the affordance. Stops the user from having to
+          find a small "Open" button inside a card of metadata. */}
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Open ${item.title || 'Untitled Experience'}`}
+        className={cn(
+          'group flex w-full flex-col items-stretch rounded-lg border bg-white p-4 text-left shadow-sm transition-all hover:shadow-md focus:outline-none focus:ring-2 focus:ring-primary/40',
+          archived ? 'border-slate-200 opacity-75' : 'border-slate-200 hover:border-primary/30',
         )}
-        {archived && item.archivedAt && (
-          <div className="flex items-center justify-between">
-            <dt>Archived</dt>
-            <dd>{new Date(item.archivedAt).toLocaleDateString()}</dd>
-          </div>
-        )}
-      </dl>
+      >
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="line-clamp-2 text-sm font-semibold text-slate-900">
+            {item.title || 'Untitled Experience'}
+          </h3>
+          <StatusBadge status={item.status} />
+        </div>
 
-      <div className="mt-3 flex items-center justify-end">
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onOpen}
-          className="h-10 gap-1 text-xs"
-        >
+        <dl className="mt-3 space-y-1 text-[11px] text-slate-500">
+          <div className="flex items-center justify-between">
+            <dt>Version</dt>
+            <dd className="font-mono text-slate-700">v{item.currentVersion}</dd>
+          </div>
+          <div className="flex items-center justify-between">
+            <dt>Updated</dt>
+            <dd>{updated.toLocaleDateString()}</dd>
+          </div>
+          {item.authorName && (
+            <div className="flex items-center justify-between">
+              <dt>Author</dt>
+              <dd className="truncate text-slate-700">{item.authorName}</dd>
+            </div>
+          )}
+          {archived && item.archivedAt && (
+            <div className="flex items-center justify-between">
+              <dt>Archived</dt>
+              <dd>{new Date(item.archivedAt).toLocaleDateString()}</dd>
+            </div>
+          )}
+        </dl>
+
+        <div className="mt-3 flex items-center justify-end gap-1 text-xs font-medium text-primary">
           Open
-          <ArrowRight className="h-3 w-3" />
-        </Button>
-      </div>
+          <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+        </div>
+      </button>
     </li>
   );
 }
