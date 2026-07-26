@@ -14,7 +14,14 @@ export interface SaveArgs {
   courseVersionId: string;
   itemId?: string;
   title: string;
-  prompt: string;
+  /**
+   * Original generation prompt. Optional — see SaveIleBody docstring
+   * in IleValidators.ts for the rationale. The service defaults an
+   * absent value to a placeholder string so the stored doc always
+   * has a non-empty prompt field (used as the experience card title
+   * fallback and in the history timeline).
+   */
+  prompt?: string;
   html: string;
   label?: string;
 }
@@ -44,6 +51,12 @@ export class IleService {
    */
   async save(args: SaveArgs): Promise<IleExperience> {
     const savedBy = args.authorName || args.ownerId;
+    // Default an absent/empty prompt to a placeholder so the stored
+    // doc always has a non-empty prompt field. The teacher may save
+    // an imported/cloned experience with no recorded prompt, or hit
+    // save mid-edit before the prompt history was hydrated — both
+    // cases previously produced 400 Bad Request from the validator.
+    const prompt = (args.prompt ?? '').trim() || '(no prompt recorded)';
 
     if (!args._id) {
       // Fresh insert — seed version 1 in the versions array so the
@@ -54,7 +67,7 @@ export class IleService {
         savedBy,
         title: args.title,
         html: args.html,
-        prompt: args.prompt,
+        prompt,
         label: args.label,
         htmlLength: args.html.length,
       };
@@ -65,9 +78,9 @@ export class IleService {
         courseVersionId: args.courseVersionId,
         itemId: args.itemId,
         title: args.title,
-        prompt: args.prompt,
+        prompt,
         history: [
-          { role: 'user', content: args.prompt },
+          { role: 'user', content: prompt },
           { role: 'assistant', content: 'Manually saved', html: args.html },
         ],
         html: args.html,
@@ -82,7 +95,7 @@ export class IleService {
     const updated = await this.repo.update(args._id, {
       title: args.title,
       html: args.html,
-      prompt: args.prompt,
+      prompt,
       itemId: args.itemId,
       courseId: args.courseId,
       courseVersionId: args.courseVersionId,
@@ -95,7 +108,7 @@ export class IleService {
       savedBy,
       title: args.title,
       html: args.html,
-      prompt: args.prompt,
+      prompt,
       label: args.label,
     });
     // Re-read so the returned doc has the new currentVersion + appended

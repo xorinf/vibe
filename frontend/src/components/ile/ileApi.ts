@@ -361,7 +361,12 @@ export interface SaveIleRequest {
   courseVersionId: string;
   itemId?: string;
   title: string;
-  prompt: string;
+  /**
+   * Original generation prompt. Optional — the backend defaults an
+   * absent/empty value to a placeholder. See SaveIleBody in
+   * backend/.../IleValidators.ts for the rationale.
+   */
+  prompt?: string;
   html: string;
 }
 

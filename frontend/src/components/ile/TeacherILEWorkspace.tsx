@@ -363,7 +363,10 @@ export function TeacherILEWorkspace({
         courseVersionId,
         itemId,
         title: title || 'Untitled Experience',
-        prompt: (saved?.prompt as string | undefined) ?? '',
+        // prompt is optional on the backend (defaults to a placeholder
+        // if absent) — pass through undefined when we don't have it
+        // loaded yet (e.g. fresh-canvas before history hydrates).
+        prompt: saved?.prompt,
         html,
       });
       setSaved(result);

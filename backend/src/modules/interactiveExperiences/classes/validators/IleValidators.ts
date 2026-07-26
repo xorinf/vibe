@@ -98,12 +98,17 @@ export class SaveIleBody {
   title: string;
 
   @JSONSchema({
-    description: 'Original generation prompt',
+    description:
+      'Original generation prompt. Optional on save — the teacher may save ' +
+      'mid-edit before the prompt has been recorded, or save an experience ' +
+      'that was imported / cloned from elsewhere. The backend defaults this ' +
+      'to a friendly placeholder if absent.',
     type: 'string',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  prompt: string;
+  @MaxLength(4000)
+  prompt?: string;
 
   @JSONSchema({
     description: 'Generated HTML payload',
@@ -236,12 +241,17 @@ export class VersionedSaveIleBody {
   title: string;
 
   @JSONSchema({
-    description: 'Original generation prompt',
+    description:
+      'Original generation prompt. Optional on save — the teacher may save ' +
+      'mid-edit before the prompt has been recorded, or save an experience ' +
+      'that was imported / cloned from elsewhere. The backend defaults this ' +
+      'to a friendly placeholder if absent.',
     type: 'string',
   })
-  @IsNotEmpty()
+  @IsOptional()
   @IsString()
-  prompt: string;
+  @MaxLength(4000)
+  prompt?: string;
 
   @JSONSchema({
     description: 'Generated HTML payload',
