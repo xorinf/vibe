@@ -132,8 +132,6 @@ export function CodeEditor({
           '.cm-gutters': { background: 'transparent', borderRight: '1px solid #e2e8f0' },
           '.cm-activeLineGutter, .cm-activeLine': { background: '#f1f5f9' },
           '.cm-selectionBackground, ::selection': { background: '#c7d2fe' },
-          // Match workspace light theme.
-          '.cm-content': { caretColor: '#7c3aed' },
         }),
         keymap.of([
           ...defaultKeymap,
