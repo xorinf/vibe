@@ -14,6 +14,8 @@ import {
   Check,
   Settings2,
   X,
+  Save,
+  Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { type CodeEditorHandle } from './CodeEditor';
@@ -572,6 +574,23 @@ export function TeacherILEWorkspace({
               onAction={handleLifecycleAction}
             />
           ) : null}
+
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleSave}
+            disabled={saving || !effectiveHtml}
+            className="h-8 gap-1 px-2 text-xs text-slate-500 hover:text-slate-900"
+            title="Save the current draft (Ctrl+S)"
+            aria-label="Save draft"
+          >
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
+            <span className="hidden md:inline">Save</span>
+          </Button>
 
           <Button
             variant="ghost"

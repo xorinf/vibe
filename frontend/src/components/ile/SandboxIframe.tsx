@@ -167,7 +167,7 @@ export function SandboxIframe({
         // the strict sandbox.
         sandbox="allow-scripts allow-same-origin"
         srcDoc={srcdoc}
-        className="h-full w-full border-0 bg-white"
+        className="h-full min-h-full w-full border-0 bg-white"
         referrerPolicy="no-referrer"
         // The SDK's READY postMessage never fires in the teacher preview
         // (we don't inject the SDK here so we don't pollute student

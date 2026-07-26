@@ -25,7 +25,10 @@ export type { ViewMode };
  * the same code so the workspace keeps functioning.
  */
 class CodeEditorErrorBoundary extends Component<
-  { children: ReactNode; fallback: (err: Error) => ReactNode },
+  {
+    children: ReactNode;
+    fallback: ReactNode;
+  },
   { error: Error | null }
 > {
   state: { error: Error | null } = { error: null };
@@ -34,11 +37,11 @@ class CodeEditorErrorBoundary extends Component<
   }
   componentDidCatch(error: Error) {
     // eslint-disable-next-line no-console
-    console.warn('[ILE] CodeEditor crashed, falling back to plain <pre>:', error);
+    console.warn('[ILE] CodeEditor crashed, falling back to <textarea>:', error);
   }
   render() {
     if (this.state.error) {
-      return this.props.fallback(this.state.error);
+      return this.props.fallback;
     }
     return this.props.children;
   }
@@ -159,11 +162,17 @@ export function EditorSplitPane({
               <SourceSubHeader isStreaming={isStreaming} />
               <div className="min-h-0 flex-1">
                 <CodeEditorErrorBoundary
-                  fallback={() => (
-                    <pre className="h-full w-full overflow-auto whitespace-pre-wrap break-all bg-slate-50 p-3 font-mono text-xs text-slate-700">
-                      <code>{effectiveHtml}</code>
-                    </pre>
-                  )}
+                  fallback={
+                    <textarea
+                      value={effectiveHtml}
+                      onChange={(e) => onCodeChange(e.target.value)}
+                      readOnly={isStreaming}
+                      spellCheck={false}
+                      className="h-full w-full resize-none border-0 bg-slate-50 p-3 font-mono text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-300"
+                      aria-label="Experience HTML source (fallback)"
+                      title="CodeMirror crashed — edit here until reload"
+                    />
+                  }
                 >
                   <CodeEditor
                     value={effectiveHtml}
@@ -213,11 +222,17 @@ export function EditorSplitPane({
               <SourceSubHeader isStreaming={isStreaming} />
               <div className="min-h-0 flex-1">
                 <CodeEditorErrorBoundary
-                  fallback={() => (
-                    <pre className="h-full w-full overflow-auto whitespace-pre-wrap break-all bg-slate-50 p-3 font-mono text-xs text-slate-700">
-                      <code>{effectiveHtml}</code>
-                    </pre>
-                  )}
+                  fallback={
+                    <textarea
+                      value={effectiveHtml}
+                      onChange={(e) => onCodeChange(e.target.value)}
+                      readOnly={isStreaming}
+                      spellCheck={false}
+                      className="h-full w-full resize-none border-0 bg-slate-50 p-3 font-mono text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-300"
+                      aria-label="Experience HTML source (fallback)"
+                      title="CodeMirror crashed — edit here until reload"
+                    />
+                  }
                 >
                   <CodeEditor
                     value={effectiveHtml}
