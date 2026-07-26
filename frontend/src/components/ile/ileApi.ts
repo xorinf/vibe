@@ -665,8 +665,30 @@ export interface IleAiConfigInput {
 export type TestConnectionStatus =
   | 'connected'
   | 'invalid_key'
+  | 'rate_limited'
+  | 'invalid_model'
+  | 'permission_denied'
+  | 'quota_exceeded'
+  | 'timeout'
   | 'network_error'
+  | 'provider_error'
+  | 'cancelled'
+  | 'unknown'
   | 'not_configured';
+export const TEST_CONNECTION_STATUS_COPY: Record<Exclude<TestConnectionStatus, 'connected' | 'idle'>, { label: string; tone: 'error' | 'warn' | 'neutral' }> = {
+  invalid_key: { label: 'Invalid API key. Re-enter it and try again.', tone: 'error' },
+  rate_limited: { label: 'The provider is rate-limiting this key. Wait briefly and retry.', tone: 'warn' },
+  invalid_model: { label: 'The provider rejected this model name. Check it or use the default.', tone: 'error' },
+  permission_denied: { label: 'This key does not have permission to use the selected model.', tone: 'error' },
+  quota_exceeded: { label: 'This provider account has reached its quota.', tone: 'error' },
+  timeout: { label: 'The provider did not respond in time. Try again.', tone: 'warn' },
+  network_error: { label: 'Could not reach the provider. Check the network and try again.', tone: 'warn' },
+  provider_error: { label: 'The provider failed on its end. Try again shortly.', tone: 'warn' },
+  cancelled: { label: 'The connection test was cancelled.', tone: 'neutral' },
+  unknown: { label: 'The provider returned an unrecognised error.', tone: 'error' },
+  not_configured: { label: 'Finish the provider configuration before testing.', tone: 'neutral' },
+};
+
 
 export interface TestConnectionResult {
   ok: boolean;
@@ -725,6 +747,16 @@ export interface GenerateArgs {
 export interface EditArgs {
   experienceId: string;
   prompt: string;
+}
+
+export interface GenerateFromContextArgs {
+  source: 'youtube';
+  input: string;
+  prompt: string;
+  courseId: string;
+  courseVersionId: string;
+  itemId?: string;
+  hint?: string;
 }
 
 /**
@@ -820,4 +852,89 @@ export function streamIleEdit(
   };
 
   return () => es.close();
+}
+/**
+ * Stream a fresh generation grounded in an external context source.
+ * Uses the same SSE event contract as ordinary generation/edit streams.
+ */
+export function streamIleGenerationFromContext(
+  args: GenerateFromContextArgs,
+  onEvent: (event: IleStreamEvent) => void,
+): () => void {
+  const token = localStorage.getItem('firebase-auth-token') ?? '';
+  const es = new ESPolyfill(
+    `${API_BASE}/interactive-experiences/generate/from-context/stream`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      },
+      body: JSON.stringify(args),
+      heartbeatTimeout: 180000,
+    },
+  );
+
+  // Inline binding (same as bindIleStream - private function).
+  let closed = false;
+  const closeOnce = () => {
+    if (closed) return;
+    closed = true;
+    es.close();
+  };
+  function bind(eventName: string, kind: IleStreamEvent['kind']) {
+    es.addEventListener(eventName, (raw) => {
+      const msg = raw as MessageEvent;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(msg.data);
+      } catch {
+        return;
+      }
+      if (!parsed || typeof parsed !== 'object') return;
+      onEvent({ kind, ...(parsed as Record<string, unknown>) } as IleStreamEvent);
+      if (kind === 'done' || kind === 'error') closeOnce();
+    });
+  }
+  bind('start', 'start');
+  bind('progress', 'progress');
+  bind('reasoning', 'reasoning');
+  bind('html', 'html');
+  bind('done', 'done');
+  bind('error', 'error');
+
+  es.onerror = (err) => {
+    console.warn('[ILE] context SSE reconnecting...', err);
+  };
+
+  return () => es.close();
+}
+
+/**
+ * Ask the AI coach for a hint about the current experience. The backend
+ * (if implemented) returns a hint string. The frontend is permissive: any
+ * string is treated as a successful hint, so the panel can still display
+ * a fallback when the endpoint is not yet wired.
+ */
+export async function askCoach(
+  experienceId: string,
+  prompt: string,
+): Promise<{ hint: string }> {
+  const token = localStorage.getItem('firebase-auth-token') ?? '';
+  const res = await fetch(
+    `${API_BASE}/interactive-experiences/${experienceId}/coach`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + token,
+      },
+      body: JSON.stringify({ prompt }),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`Coach request failed: ${res.status} ${res.statusText}`);
+  }
+  const data = (await res.json()) as { hint?: string };
+  return { hint: data.hint ?? 'The coach is thinking...' };
 }
