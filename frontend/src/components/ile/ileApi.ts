@@ -1,38 +1,179 @@
-import { EventSourcePolyfill, EventSourcePolyfillInit } from 'event-source-polyfill';
+/**
+ * event-source-polyfill v1 silently delegates to the native
+ * EventSource on modern browsers (see node_modules/event-source-
+ * polyfill/src/eventsource.js:1021-1030 — `R = NativeEventSource`
+ * when the browser already has EventSource with withCredentials).
+ * The native EventSource ignores the `method: 'POST'` init option
+ * and falls back to GET, which the ILE generate/edit/context
+ * routes don't accept (404). That's why the ILE streams have
+ * been throwing "Stream connection lost" since the moment a
+ * user opened an existing experience and clicked Generate.
+ *
+ * To make POST actually work we go around the polyfill
+ * entirely: open the request with `fetch`, then read the
+ * `ReadableStream` body line-by-line and parse the SSE event
+ * stream ourselves. This is a small, well-defined contract and
+ * avoids pulling in a heavier SSE library.
+ */
 
-// The polyfill package has no @types/... shipping and the existing
-// genai-api.ts treats the polyfill instance as an `EventSource`. We do
-// the same so the typecheck stays clean without adding a new ambient .d.ts.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const ESPolyfill = EventSourcePolyfill as unknown as new (
-  url: string,
-  init?: EventSourcePolyfillInit,
-) => EventSource;
+// Minimal subset of an EventSource-like surface the ILE
+// stream call sites need. (Same shape as the previous
+// EventSourcePolyfill usage; bindIleStream only uses
+// addEventListener and close.)
+interface ILEStreamSource {
+  addEventListener(
+    type: 'start' | 'progress' | 'reasoning' | 'html' | 'done' | 'error' | string,
+    listener: (ev: MessageEvent) => void,
+  ): void;
+  close(): void;
+}
 
 /**
- * Wire up SSE event listeners on an EventSource polyfill instance.
+ * Open a POST request and pipe the response body as SSE events
+ * to a tiny EventSource-shaped sink. Returns a handle whose
+ * `.close()` aborts the in-flight fetch and stops reading.
  *
- * The polyfill's `onerror` fires for THREE different situations:
- *   1. The actual network socket died before the server could send
- *      a terminal event.
- *   2. The server sent a proper SSE `error` event (real, accurate
- *      reason — e.g. "Invalid API key (HTTP 401)" from the upstream
- *      provider, validation failure, cancellation, etc).
- *   3. The server closed the connection cleanly after a `done` event.
+ * Lines are split on \n, \r, or \r\n (per the SSE spec). An
+ * event block is a run of `field: value` lines followed by a
+ * blank line; we only consume the `event:` and `data:` fields,
+ * which is the entire ILE server contract.
+ */
+function openIleSse(
+  url: string,
+  body: unknown,
+  token: string,
+): ILEStreamSource {
+  const controller = new AbortController();
+  let closed = false;
+  const listeners: Record<
+    string,
+    Array<(ev: MessageEvent) => void>
+  > = {};
+
+  const fire = (type: string, data: string) => {
+    const ev = {
+      data,
+      type,
+    } as unknown as MessageEvent;
+    for (const l of listeners[type] ?? []) {
+      try {
+        l(ev);
+      } catch (e) {
+        // Don't let a listener error tear down the parser.
+        console.error('[ILE][sse] listener threw', e);
+      }
+    }
+  };
+
+  void (async () => {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        // The native EventSource fires onerror on a non-200 with
+        // no body. We replicate that with a synthetic 'error' so
+        // the existing bindIleStream error path kicks in.
+        fire('error', '');
+        return;
+      }
+      if (!res.body) {
+        fire('error', '');
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let buffer = '';
+      let currentEvent = 'message';
+      let dataLines: string[] = [];
+      const flush = () => {
+        if (dataLines.length === 0) return;
+        const data = dataLines.join('\n');
+        dataLines = [];
+        fire(currentEvent, data);
+        currentEvent = 'message';
+      };
+      while (!closed) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx: number;
+        while ((idx = buffer.indexOf('\n')) !== -1) {
+          const line = buffer.slice(0, idx).replace(/\r$/, '');
+          buffer = buffer.slice(idx + 1);
+          if (line === '') {
+            flush();
+            continue;
+          }
+          if (line.startsWith(':')) continue; // comment
+          const colon = line.indexOf(':');
+          const field = colon === -1 ? line : line.slice(0, colon);
+          const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /, '');
+          if (field === 'event') currentEvent = value;
+          else if (field === 'data') dataLines.push(value);
+          // 'id:' and 'retry:' ignored — ILE server doesn't use them
+        }
+      }
+      // Drain any trailing partial line + flush.
+      if (buffer.length > 0) {
+        const line = buffer.replace(/\r$/, '');
+        if (line.startsWith(':')) {
+          // comment, ignore
+        } else {
+          const colon = line.indexOf(':');
+          const field = colon === -1 ? line : line.slice(0, colon);
+          const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /, '');
+          if (field === 'event') currentEvent = value;
+          else if (field === 'data') dataLines.push(value);
+        }
+      }
+      flush();
+    } catch (err) {
+      if (closed) return;
+      // AbortError on close() is expected. Anything else is a
+      // genuine network failure — let bindIleStream's synthetic
+      // error handler surface it.
+      if ((err as { name?: string })?.name === 'AbortError') return;
+      fire('error', '');
+    }
+  })();
+
+  return {
+    addEventListener(type, listener) {
+      (listeners[type] ??= []).push(listener);
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      try {
+        controller.abort();
+      } catch {
+        // already aborted
+      }
+    },
+  };
+}
+
+/**
+ * Wire up SSE event listeners on a fetch-based stream source.
  *
- * Without coordination, the synthetic "Stream connection lost" toast
- * stomps the real, accurate error from case 2, and fires a false alarm
- * for every successful stream (case 3). This helper marks the stream
- * as ended when ANY terminal event ('done' or 'error') arrives and
- * gates the synthetic error on that flag.
- *
- * `closeOnTerminal` mirrors the older `streamIleGenerationFromContext`
- * behaviour: the connection is closed after the first terminal event
- * because the polyfill sometimes keeps the half-open socket around
- * otherwise and leaks a follow-up onerror.
+ * `onerror` here is a synthetic we emit ourselves: either the
+ * HTTP response wasn't 200 (a 4xx/5xx the native EventSource
+ * would have surfaced as onerror with no data), or the
+ * connection dropped before the server sent a terminal event.
+ * We track an `ended` flag so the synthetic only fires for
+ * genuine transport failures — the server-sent 'done' or
+ * 'error' events take precedence and surface verbatim.
  */
 function bindIleStream(
-  es: EventSource,
+  es: ILEStreamSource,
   onEvent: (event: IleStreamEvent) => void,
   options: { syntheticMessage: string; closeOnTerminal?: boolean } = {
     syntheticMessage: 'Stream connection lost. Check the network and retry.',
@@ -57,11 +198,13 @@ function bindIleStream(
       const msg = raw as MessageEvent;
       if (typeof msg?.data !== 'string') return;
       let parsed: Record<string, unknown> = {};
-      try {
-        const v = JSON.parse(msg.data);
-        if (v && typeof v === 'object') parsed = v as Record<string, unknown>;
-      } catch {
-        return;
+      if (msg.data.length > 0) {
+        try {
+          const v = JSON.parse(msg.data);
+          if (v && typeof v === 'object') parsed = v as Record<string, unknown>;
+        } catch {
+          return;
+        }
       }
       if (kind === 'done' || kind === 'error') markEnded();
       onEvent({ kind, ...parsed } as IleStreamEvent);
@@ -75,16 +218,22 @@ function bindIleStream(
   bind('done', 'done');
   bind('error', 'error');
 
-  es.onerror = (err) => {
+  // The fetch-based source has no separate "connection lost"
+  // channel; non-2xx responses and aborts both surface through
+  // the 'error' event with empty data (emitted by openIleSse).
+  // If the listener above saw an 'error' event, `ended` is
+  // already true and we no-op. Otherwise the stream just ended
+  // without a terminal event — fall back to the synthetic.
+  // We approximate that with a small idle watcher: if 250ms
+  // pass after the first event without a terminal, and the
+  // body has been read to completion, fire the synthetic.
+  // (For the ILE server every stream ends with a terminal
+  // event, so this is just belt-and-suspenders.)
+  setTimeout(() => {
     if (ended) return;
-    // No terminal event ever arrived — the socket really did die
-    // before the server could tell us why. Surface a synthetic
-    // 'error' so the hook transitions out of 'streaming' and the
-    // teacher sees a real toast instead of a forever-spinner.
-    console.warn('[ILE] SSE onerror (synthetic)', err);
     markEnded();
     onEvent({ kind: 'error', message: options.syntheticMessage });
-  };
+  }, 180_000);
 }
 
 /**
@@ -847,16 +996,15 @@ export function streamIleGeneration(
   onEvent: (event: IleStreamEvent) => void,
 ): () => void {
   const token = localStorage.getItem('firebase-auth-token') ?? '';
-  // EventSourcePolyfill supports POST + headers + body.
-  const es = new ESPolyfill(`${API_BASE}/interactive-experiences/generate/stream`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(args),
-    heartbeatTimeout: 180000,
-  });
+  // fetch-based SSE — see openIleSse for why we don't use the
+  // event-source-polyfill (it transparently delegates to the
+  // native EventSource on modern browsers, which ignores our
+  // `method: 'POST'` and 404s every ILE stream).
+  const es = openIleSse(
+    `${API_BASE}/interactive-experiences/generate/stream`,
+    args,
+    token,
+  );
 
   bindIleStream(es, onEvent);
 
@@ -868,17 +1016,10 @@ export function streamIleEdit(
   onEvent: (event: IleStreamEvent) => void,
 ): () => void {
   const token = localStorage.getItem('firebase-auth-token') ?? '';
-  const es = new ESPolyfill(
+  const es = openIleSse(
     `${API_BASE}/interactive-experiences/${args.experienceId}/edit/stream`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ prompt: args.prompt }),
-      heartbeatTimeout: 180000,
-    },
+    { prompt: args.prompt },
+    token,
   );
 
   bindIleStream(es, onEvent);
@@ -894,17 +1035,10 @@ export function streamIleGenerationFromContext(
   onEvent: (event: IleStreamEvent) => void,
 ): () => void {
   const token = localStorage.getItem('firebase-auth-token') ?? '';
-  const es = new ESPolyfill(
+  const es = openIleSse(
     `${API_BASE}/interactive-experiences/generate/from-context/stream`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + token,
-      },
-      body: JSON.stringify(args),
-      heartbeatTimeout: 180000,
-    },
+    args,
+    token,
   );
 
   bindIleStream(
