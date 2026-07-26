@@ -39,7 +39,7 @@ export function EditorToolbar({
   isEditorReady,
 }: EditorToolbarProps) {
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 bg-white px-2 [&>*]:shrink-0">
+    <div className="flex h-9 shrink-0 items-center gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-2 [&>*]:shrink-0">
       <ViewModeSwitch value={viewMode} onChange={onViewModeChange} />
 
       <Divider />
@@ -75,7 +75,7 @@ export function EditorToolbar({
 function Divider() {
   return (
     <span
-      className="mx-0.5 h-5 w-px shrink-0 bg-slate-200"
+      className="mx-0.5 h-5 w-px shrink-0 bg-slate-200 dark:bg-slate-700"
       aria-hidden="true"
     />
   );
@@ -117,7 +117,7 @@ function ToolbarButton({
       {icon}
       <span className="hidden xl:inline">{label}</span>
       {shortcut && (
-        <span className="hidden 2xl:inline text-[10px] text-slate-400">
+        <span className="hidden 2xl:inline text-[10px] text-slate-400 dark:text-slate-500">
           {shortcut}
         </span>
       )}
@@ -134,7 +134,7 @@ function ViewModeSwitch({
 }) {
   return (
     <div
-      className="inline-flex shrink-0 items-center rounded-md border border-slate-200 bg-slate-50 p-0.5"
+      className="inline-flex shrink-0 items-center rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 p-0.5"
       role="radiogroup"
       aria-label="View mode"
     >

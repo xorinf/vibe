@@ -222,7 +222,7 @@ export interface CentreCanvasProps {
 export function CentreCanvas(props: CentreCanvasProps) {
   const { viewMode, streamState, experienceId } = props;
   return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-slate-50">
+    <main className="flex min-h-0 min-w-0 flex-1 flex-col bg-slate-50 dark:bg-slate-900/60">
       <div className="flex min-h-0 flex-1 flex-col">
         {viewMode === 'preview' && (
           <EditorDockStrip
@@ -304,7 +304,7 @@ function CentreStatusBar({
           {isError ? 'Error' : isStreaming ? 'Streaming' : 'Ready'}
         </span>
       </span>
-      <span aria-hidden="true" className="h-3 w-px bg-slate-200" />
+      <span aria-hidden="true" className="h-3 w-px bg-slate-200 dark:bg-slate-700" />
       <span>{charCount.toLocaleString()} chars</span>
       <div className="flex-1" />
       <span className="inline-flex items-center gap-1">
@@ -338,11 +338,11 @@ function EditorDockStrip({
   return (
     <div
       style={{ height: '40px' }}
-      className="flex shrink-0 items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 text-[11px] text-slate-600"
+      className="flex shrink-0 items-center gap-2 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/60 px-3 text-[11px] text-slate-600 dark:text-slate-400"
     >
-      <Code2 className="h-3.5 w-3.5 text-slate-400" />
+      <Code2 className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
       <span className="font-medium">Editor</span>
-      <span className="text-slate-400">Hidden</span>
+      <span className="text-slate-400 dark:text-slate-500">Hidden</span>
       <div className="flex-1" />
       <Button
         size="sm"

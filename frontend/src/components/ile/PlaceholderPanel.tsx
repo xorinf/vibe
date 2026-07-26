@@ -30,8 +30,8 @@ export function PlaceholderPanel({
       }
     >
       <Sparkles className="h-5 w-5 text-primary/40" aria-hidden="true" />
-      <p className="text-slate-700">{title}</p>
-      <p className="text-xs text-slate-500">{hint ?? defaultHint}</p>
+      <p className="text-slate-700 dark:text-slate-300">{title}</p>
+      <p className="text-xs text-slate-500 dark:text-slate-400">{hint ?? defaultHint}</p>
     </div>
   );
 }

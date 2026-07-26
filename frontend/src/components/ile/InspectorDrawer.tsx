@@ -147,7 +147,7 @@ function InspectorTabStrip({
   onClose: () => void;
 }) {
   return (
-    <div className="flex h-9 shrink-0 items-center border-b border-slate-200 bg-slate-50/60">
+    <div className="flex h-9 shrink-0 items-center border-b border-slate-200 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900/60">
       <div className="flex h-full flex-1 items-stretch overflow-x-auto">
         {INSPECTOR_TABS.map((t) => (
           <button
@@ -179,7 +179,7 @@ function InspectorTabStrip({
         onClick={onClose}
         aria-label="Hide inspector"
         title="Hide inspector"
-        className="h-7 w-7 mr-1 text-slate-500 hover:text-slate-900"
+        className="h-7 w-7 mr-1 text-slate-500 dark:text-slate-400 hover:text-slate-900"
       >
         <X className="h-3.5 w-3.5" />
       </Button>

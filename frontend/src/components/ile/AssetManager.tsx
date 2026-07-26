@@ -242,13 +242,13 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
   return (
     <div className={cn('flex h-full flex-col bg-slate-50', className)}>
       {/* Toolbar */}
-      <div className="border-b bg-white px-4 py-3">
+      <div className="border-b bg-white dark:bg-slate-900 px-4 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <Upload className="h-4 w-4 text-violet-600" />
-            <h2 className="text-sm font-semibold text-slate-900">Asset library</h2>
+            <Upload className="h-4 w-4 text-violet-600 dark:text-violet-400" />
+            <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Asset library</h2>
             {items.length > 0 && (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+              <span className="rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-medium text-slate-600 dark:text-slate-400">
                 {items.length}
               </span>
             )}
@@ -272,7 +272,7 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
         </div>
         <div className="mt-2 flex items-center gap-2">
           <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -283,7 +283,7 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value as typeof filter)}
-            className="h-8 rounded-md border border-slate-300 bg-white px-2 text-sm"
+            className="h-8 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2 text-sm"
           >
             <option value="all">All kinds</option>
             {(Object.keys(KIND_LABELS) as IleAssetKind[]).map((k) => (
@@ -325,11 +325,11 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
             <UploadingIndicator name={uploading.name} pct={uploading.pct} />
           ) : (
             <>
-              <Upload className="mx-auto h-5 w-5 text-slate-400" />
-              <p className="mt-2 text-xs text-slate-500">
+              <Upload className="mx-auto h-5 w-5 text-slate-400 dark:text-slate-500" />
+              <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
                 Drop files here, or use the Upload button.
               </p>
-              <p className="mt-1 text-[10px] text-slate-400">
+              <p className="mt-1 text-[10px] text-slate-400 dark:text-slate-500">
                 Images · Audio · Video · PDF · SVG — each with a per-kind size cap.
               </p>
             </>
@@ -344,10 +344,10 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
             const Icon = KIND_ICONS[kind];
             return (
               <section key={kind}>
-                <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                <h3 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   <Icon className="h-3.5 w-3.5" />
                   {KIND_LABELS[kind]}
-                  <span className="font-normal normal-case text-slate-400">
+                  <span className="font-normal normal-case text-slate-400 dark:text-slate-500">
                     ({list.length})
                   </span>
                 </h3>
@@ -365,7 +365,7 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
             );
           })}
           {!loading && items.length === 0 && (
-            <p className="py-6 text-center text-xs text-slate-500">
+            <p className="py-6 text-center text-xs text-slate-500 dark:text-slate-400">
               No assets match the current filters.
             </p>
           )}
@@ -380,16 +380,16 @@ export function AssetManager({ onPick, className }: AssetManagerProps) {
 function UploadingIndicator({ name, pct }: { name: string; pct: number }) {
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium text-slate-700">
+      <p className="text-xs font-medium text-slate-700 dark:text-slate-300">
         Uploading <span className="font-mono">{name}</span>…
       </p>
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
         <div
           className="h-full rounded-full bg-violet-500 transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <p className="text-[10px] text-slate-500">{pct}%</p>
+      <p className="text-[10px] text-slate-500 dark:text-slate-400">{pct}%</p>
     </div>
   );
 }
@@ -435,8 +435,8 @@ function AssetCard({
     : `${(asset.size / 1024 / 1024).toFixed(1)} MB`;
 
   return (
-    <li className="group relative overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm transition-all hover:border-violet-300 hover:shadow-md">
-      <div className="relative h-20 w-full overflow-hidden bg-slate-100">
+    <li className="group relative overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-sm transition-all hover:border-violet-300 hover:shadow-md">
+      <div className="relative h-20 w-full overflow-hidden bg-slate-100 dark:bg-slate-800">
         {thumb ? (
           <img
             src={thumb}
@@ -445,7 +445,7 @@ function AssetCard({
             onError={() => setThumbError(true)}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-slate-400">
+          <div className="flex h-full w-full items-center justify-center text-slate-400 dark:text-slate-500">
             <Icon className="h-7 w-7" />
           </div>
         )}
@@ -454,7 +454,7 @@ function AssetCard({
             href={thumb ?? '#'}
             target="_blank"
             rel="noopener noreferrer"
-            className="absolute right-1.5 top-1.5 hidden rounded-full bg-white/90 p-1 text-slate-600 hover:text-slate-900 group-hover:block"
+            className="absolute right-1.5 top-1.5 hidden rounded-full bg-white/90 dark:bg-slate-900 p-1 text-slate-600 dark:text-slate-400 hover:text-slate-900 group-hover:block"
             title="Open in new tab"
           >
             <ExternalLink className="h-3 w-3" />
@@ -463,12 +463,12 @@ function AssetCard({
       </div>
       <div className="p-2">
         <p
-          className="truncate text-xs font-medium text-slate-900"
+          className="truncate text-xs font-medium text-slate-900 dark:text-slate-100"
           title={asset.filename}
         >
           {asset.filename}
         </p>
-        <p className="mt-0.5 flex items-center justify-between text-[10px] text-slate-500">
+        <p className="mt-0.5 flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400">
           <span>{sizeKb}</span>
           <span>{new Date(asset.createdAt).toLocaleDateString()}</span>
         </p>
@@ -485,7 +485,7 @@ function AssetCard({
             size="icon"
             variant="ghost"
             onClick={onDelete}
-            className="h-6 w-6 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+            className="h-6 w-6 text-slate-400 dark:text-slate-500 hover:bg-rose-50 hover:text-rose-600"
             aria-label="Delete"
           >
             <Trash2 className="h-3 w-3" />

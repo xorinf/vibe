@@ -158,7 +158,7 @@ export function EditorSplitPane({
           className="min-h-0 flex-1"
         >
           <Panel id="code" order={1} defaultSize={splitRatio} minSize={20}>
-            <div className="flex h-full min-h-0 flex-col bg-white">
+            <div className="flex h-full min-h-0 flex-col bg-white dark:bg-slate-900">
               <SourceSubHeader isStreaming={isStreaming} />
               <div className="min-h-0 flex-1">
                 <CodeEditorErrorBoundary
@@ -168,7 +168,7 @@ export function EditorSplitPane({
                       onChange={(e) => onCodeChange(e.target.value)}
                       readOnly={isStreaming}
                       spellCheck={false}
-                      className="h-full w-full resize-none border-0 bg-slate-50 p-3 font-mono text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-300"
+                      className="h-full w-full resize-none border-0 bg-slate-50 dark:bg-slate-900/60 p-3 font-mono text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-300"
                       aria-label="Experience HTML source (fallback)"
                       title="CodeMirror crashed — edit here until reload"
                     />
@@ -228,7 +228,7 @@ export function EditorSplitPane({
                       onChange={(e) => onCodeChange(e.target.value)}
                       readOnly={isStreaming}
                       spellCheck={false}
-                      className="h-full w-full resize-none border-0 bg-slate-50 p-3 font-mono text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-300"
+                      className="h-full w-full resize-none border-0 bg-slate-50 dark:bg-slate-900/60 p-3 font-mono text-xs text-slate-700 dark:text-slate-300 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-300"
                       aria-label="Experience HTML source (fallback)"
                       title="CodeMirror crashed — edit here until reload"
                     />
@@ -286,11 +286,11 @@ export function EditorSplitPane({
 
 function SourceSubHeader({ isStreaming }: { isStreaming: boolean }) {
   return (
-    <div className="flex h-7 shrink-0 items-center justify-between border-b bg-slate-50 px-3 text-[11px] font-medium text-slate-600">
+    <div className="flex h-7 shrink-0 items-center justify-between border-b bg-slate-50 dark:bg-slate-900/60 px-3 text-[11px] font-medium text-slate-600 dark:text-slate-400">
       <span className="flex items-center gap-1.5">
         <Code className="h-3 w-3" /> Source
       </span>
-      <span className="text-[10px] text-slate-400">
+      <span className="text-[10px] text-slate-400 dark:text-slate-500">
         {isStreaming
           ? 'AI editing — manual changes are paused'
           : 'Click to edit; ⌘S to save'}

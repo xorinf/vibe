@@ -44,8 +44,8 @@ export function AssetAttachments({
         className,
       )}
     >
-      <Paperclip className="h-3.5 w-3.5 text-violet-600" />
-      <span className="text-[10px] font-medium uppercase tracking-wider text-violet-700">
+      <Paperclip className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+      <span className="text-[10px] font-medium uppercase tracking-wider text-violet-700 dark:text-violet-300">
         Attached
       </span>
       {assets.map((asset) => (
@@ -76,7 +76,7 @@ function AttachedChip({
   onRemove: () => void;
 }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 bg-white py-0.5 pl-2 pr-1 text-[10px] text-slate-700">
+    <span className="inline-flex items-center gap-1 rounded-full border border-violet-200 dark:border-violet-800 bg-white dark:bg-slate-900 py-0.5 pl-2 pr-1 text-[10px] text-slate-700 dark:text-slate-300">
       <a
         href={asset.url}
         target="_blank"
@@ -90,7 +90,7 @@ function AttachedChip({
       <button
         type="button"
         onClick={onRemove}
-        className="rounded-full p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+        className="rounded-full p-0.5 text-slate-400 dark:text-slate-500 hover:bg-rose-50 hover:text-rose-600"
         aria-label={`Remove ${asset.filename}`}
       >
         <X className="h-3 w-3" />

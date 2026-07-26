@@ -166,7 +166,7 @@ export function ActionsMenu({
         onClick={() => setOpen((v) => !v)}
         disabled={isBusy}
         aria-label="Experience actions"
-        className="h-10 gap-1 px-2 text-xs text-slate-500 hover:text-slate-900"
+        className="h-10 gap-1 px-2 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900"
       >
         {isBusy ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -177,11 +177,11 @@ export function ActionsMenu({
       </Button>
 
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-slate-200 bg-white shadow-lg">
+        <div className="absolute right-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg">
           {/* Inline rename */}
           {renaming ? (
             <div className="space-y-2 p-3">
-              <label className="text-[11px] font-medium text-slate-600">
+              <label className="text-[11px] font-medium text-slate-600 dark:text-slate-400">
                 Rename experience
               </label>
               <input
@@ -198,7 +198,7 @@ export function ActionsMenu({
                     setNewTitle(currentTitle);
                   }
                 }}
-                className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                className="w-full rounded-md border border-slate-300 dark:border-slate-600 px-2 py-1.5 text-sm focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
               />
               <div className="flex items-center justify-end gap-2">
                 <Button
@@ -315,7 +315,7 @@ function MenuItem({
         <span className="flex-1">
           <span className="block text-[13px] font-medium">{label}</span>
           {hint && (
-            <span className="block text-[11px] text-slate-500">{hint}</span>
+            <span className="block text-[11px] text-slate-500 dark:text-slate-400">{hint}</span>
           )}
         </span>
       </button>

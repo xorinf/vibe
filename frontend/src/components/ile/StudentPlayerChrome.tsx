@@ -136,7 +136,7 @@ export function StudentPlayerChrome({
           role="status"
           aria-live="polite"
           data-testid="ile-impersonation-banner"
-          className="flex w-full items-center justify-center gap-2 bg-amber-100 px-4 py-2 text-sm font-medium text-amber-800 border-b border-amber-300"
+          className="flex w-full items-center justify-center gap-2 bg-amber-100 dark:bg-amber-900/40 px-4 py-2 text-sm font-medium text-amber-800 border-b border-amber-300"
         >
           <Eye className="h-4 w-4" aria-hidden="true" />
           <span>You are viewing this as a student. Your actions here are not recorded.</span>
@@ -317,7 +317,7 @@ export function StudentPlayerChrome({
 
 function LoadingOverlay({ message }: { message?: string }) {
   return (
-    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-white text-sm text-slate-500">
+    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-white dark:bg-slate-900 text-sm text-slate-500 dark:text-slate-400">
       <div className="flex items-center gap-2">
         <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
         {message ?? 'Loading experience…'}
@@ -334,13 +334,13 @@ function ErrorOverlay({
   onRetry?: () => void;
 }) {
   return (
-    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white px-6 text-center">
+    <div className="absolute inset-0 z-10 flex items-center justify-center bg-white dark:bg-slate-900 px-6 text-center">
       <div className="max-w-md space-y-3">
         <AlertTriangle className="mx-auto h-8 w-8 text-rose-400" />
-        <p className="text-base font-medium text-slate-900">
+        <p className="text-base font-medium text-slate-900 dark:text-slate-100">
           Couldn&apos;t load this experience
         </p>
-        <p className="text-sm text-slate-600">{message}</p>
+        <p className="text-sm text-slate-600 dark:text-slate-400">{message}</p>
         {onRetry && (
           <Button size="lg" variant="outline" onClick={onRetry} className="mt-2">
             Go back
