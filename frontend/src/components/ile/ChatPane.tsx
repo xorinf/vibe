@@ -26,6 +26,7 @@ import {
 } from './quickActions';
 import type { ChatMessage, IleEditorApi, IleEditorState } from './useIleEditor';
 import { AddContextMenu } from './AddContextMenu';
+import { AssetAttachments } from './AssetAttachments';
 
 export interface ChatPaneProps {
   state: IleEditorState;
@@ -300,8 +301,15 @@ export function ChatPane({
           </div>
         </div>
       ) : (
-        <div className="border-t bg-white p-3">
-          <Textarea
+        <>
+          {state.attachedAssets.length > 0 && (
+            <AssetAttachments
+              assets={state.attachedAssets}
+              onRemove={api.detachAsset}
+            />
+          )}
+          <div className="border-t bg-white p-3">
+            <Textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder={
@@ -366,6 +374,7 @@ export function ChatPane({
             </div>
           </div>
         </div>
+        </>
       )}
     </div>
   );
