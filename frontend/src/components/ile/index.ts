@@ -5,11 +5,8 @@ export { HistoryPanel } from './HistoryPanel';
 export { ActionsMenu } from './ActionsMenu';
 export { SandboxIframe } from './SandboxIframe';
 export { AiConfigPanel } from './AiConfigPanel';
-export { useIleGeneration } from './useIleGeneration';
 export { useIleEditor } from './useIleEditor';
 export type {
-  IleStreamState,
-  UseIleGenerationApi,
 } from './useIleGeneration';
 export type {
   ChatMessage,
