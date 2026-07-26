@@ -85,6 +85,7 @@ const { mutate: markAllSystemRead } = useMarkAllSystemNotificationsAsRead();
 };
 
   useEffect(() => {
+    if (!Array.isArray(matches)) return;
     const items: any[] = [];
     items.push({
       label: "Dashboard",
@@ -95,6 +96,7 @@ const { mutate: markAllSystemRead } = useMarkAllSystemNotificationsAsRead();
     if (matches.length > 1) {
       for (let i = 1; i < matches.length; i++) {
         const match = matches[i];
+        if (!match) continue;
         const path = match.pathname;
         const segments = path.split("/");
         let label = segments[segments.length - 1] || "";

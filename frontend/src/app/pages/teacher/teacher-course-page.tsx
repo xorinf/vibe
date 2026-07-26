@@ -166,6 +166,7 @@ function TeacherCourseContent() {
 
 
   useEffect(() => {
+    if (!Array.isArray(matches)) return;
     const items: BreadcrumbItem[] = [];
     items.push({
       label: "Dashboard",
@@ -180,6 +181,7 @@ function TeacherCourseContent() {
     if (matches.length > 1) {
       for (let i = 1; i < matches.length; i++) {
         const match = matches[i];
+        if (!match) continue;
         const path = match.pathname;
         const segments = path.split("/").filter(Boolean);
         let label = segments[segments.length - 1] || "";

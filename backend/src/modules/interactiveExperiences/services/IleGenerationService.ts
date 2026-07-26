@@ -292,6 +292,7 @@ export class IleGenerationService {
           kind: 'cancelled',
           reason: cancellationReason,
         });
+        sse.close();
         return;
       }
 
@@ -773,6 +774,14 @@ export class IleGenerationService {
         model: config.model,
         elapsedMs: Date.now() - t0,
       });
+      // End the response so routing-controllers' ExpressDriver
+      // doesn't try to send a final JSON body when the controller
+      // method returns — sending after the SSE body has been
+      // streamed triggers `Cannot set headers after they are
+      // sent to the client` and Sentry noise. The frontend's
+      // fetch-based SSE parser treats the connection close as a
+      // clean end-of-stream.
+      sse.close();
 
       ileLog('info', 'stream.complete', {
         requestId,
