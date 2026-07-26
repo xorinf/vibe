@@ -717,6 +717,86 @@ export function useIleEditor(): UseIleEditorApi {
   }, [stream?.status]);
 
   // ───────────────────────────────────────────────────────────────────
+  // P1-5: silent-stream watchdog.
+  //
+  // Symptom (worked case 2026-07-26 evening, viBe ILE): the LLM stream
+  // was visibly in "Finalizing" step for 5+ minutes with no further
+  // events. The ReadableStream reader in ileApi.ts only fires `done`
+  // when the upstream closes cleanly — if the proxy / network just
+  // drops the TCP socket without a buffered `event: done\ndata: …\n\n`
+  // frame, the parser exits the read loop and flush() runs with nothing
+  // in the buffer. No terminal event fires, the hook stays in
+  // `'streaming'`, the assistant bubble keeps its "… streaming…" text,
+  // and the teacher is stuck.
+  //
+  // Fix: a polling watchdog. If the stream sits in 'streaming' with no
+  // `lastDeltaAt` update for > 90s, we force-transition to 'error'
+  // with a clear message. The chat error pill (ChatPane.tsx:248-255)
+  // then renders the message so the teacher knows to retry instead of
+  // staring at "Finalizing…" forever. We also clear `editing` and
+  // cancel any in-flight request so the editor unlocks. The previous
+  // headHtml is preserved (we keep stream.html as-is) so the preview
+  // keeps showing the last good artifact.
+  //
+  // 90s is chosen to comfortably outlive the upstream provider's own
+  // 120s deadline in providers/openaiCompatibleProvider.ts — if the
+  // provider-side deadline fires the backend emits an 'error' event
+  // and we transition normally. The watchdog only fires for the
+  // pathological "silent disconnect" case.
+  useEffect(() => {
+    if (stream?.status !== 'streaming') return;
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const lastDelta = stream.lastDeltaAt ?? startedAt;
+      const idleMs = now - lastDelta;
+      if (idleMs < 90_000) return;
+      // Stop polling — we only want one terminal transition.
+      clearInterval(interval);
+      // eslint-disable-next-line no-console
+      console.warn('[ILE] stream watchdog: no events for', Math.round(idleMs / 1000), 's');
+      cancelRef.current?.();
+      cancelRef.current = null;
+      setStream((s) => {
+        const base =
+          s ??
+          ({
+            html: '',
+            progress: [],
+            reasoning: false,
+            status: 'idle',
+          } as IleStreamState);
+        return {
+          ...base,
+          status: 'error',
+          error: `The AI stream stopped responding after ${Math.round(
+            idleMs / 1000,
+          )}s. Please retry.`,
+          reasoning: false,
+        };
+      });
+      setEditing(false);
+      // Surface the watchdog as an error pill on the in-flight message
+      // so the teacher sees a clear explanation instead of "… streaming…"
+      setMessages((ms) =>
+        ms.map((m) =>
+          m.inFlight
+            ? {
+                ...m,
+                content: `Error: AI stream stopped responding after ${Math.round(
+                  idleMs / 1000,
+                )}s. Please retry.`,
+                inFlight: false,
+              }
+            : m,
+        ),
+      );
+      inFlightMsgIdRef.current = null;
+    }, 5_000);
+    return () => clearInterval(interval);
+  }, [stream?.status, stream?.lastDeltaAt]);
+
+  // ───────────────────────────────────────────────────────────────────
   // Cancellation on unmount
   useEffect(() => {
     return () => {
