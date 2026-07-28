@@ -90,7 +90,12 @@ function openIleSse(
       //
       // Surface non-2xx as a synthetic `error` ONLY when the body is
       // empty / unreadable — that's the genuine "stream never started"
-      // case (validation failure, auth, route 404).
+      // case (validation failure, auth, route 404). For non-empty
+      // non-2xx bodies, the parser runs to EOF; if no terminal event
+      // arrives, the EOF handler below synthesizes the error.
+      const wasNonOk = !res.ok;
+      const status = res.status;
+      const contentType = res.headers.get('content-type') ?? '';
       if (!res.body) {
         fire('error', '');
         return;
@@ -100,11 +105,20 @@ function openIleSse(
       let buffer = '';
       let currentEvent = 'message';
       let dataLines: string[] = [];
+      // Track whether a terminal event fired during the stream. The
+      // EOF handler below fires a synthetic `error` if no terminal
+      // event was seen — closes audit H8 (a non-2xx body or an empty
+      // body that parsed to no events used to wait 90s for the
+      // editor watchdog; now it surfaces immediately).
+      let sawTerminalEvent = false;
       const flush = () => {
         if (dataLines.length === 0) return;
         const data = dataLines.join('\n');
         dataLines = [];
         fire(currentEvent, data);
+        if (currentEvent === 'done' || currentEvent === 'error') {
+          sawTerminalEvent = true;
+        }
         currentEvent = 'message';
       };
       while (!closed) {
@@ -142,6 +156,23 @@ function openIleSse(
         }
       }
       flush();
+
+      // EOF reached. If we never saw a terminal SSE event, the stream
+      // is implicitly broken — auth, 4xx, 5xx, proxy error page, etc.
+      // Synthesize an `error` so the editor hook doesn't wait 90s for
+      // the watchdog. We always include status + content-type in the
+      // synthetic payload so the UI can show "the stream returned
+      // HTTP 401 before sending any events" instead of a generic
+      // "stalled" toast. Status 0 means the request never got a
+      // response (network error before first byte).
+      if (!sawTerminalEvent && !closed) {
+        const summary = wasNonOk
+          ? `Server returned HTTP ${status} ${contentType ? `(${contentType.split(';')[0]})` : ''}`
+          : status
+            ? `Stream ended without a terminal event (HTTP ${status})`
+            : 'Stream ended without a terminal event';
+        fire('error', summary);
+      }
     } catch (err) {
       if (closed) return;
       // AbortError on close() is expected. Anything else is a
@@ -387,7 +418,7 @@ export interface SaveIleRequest {
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -407,7 +438,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
  * PUT helper for the AI config endpoint. Body shape matches IleAiConfigInput.
  */
 async function putJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
     method: 'PUT',
     credentials: 'include',
     headers: {
@@ -429,7 +460,7 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
  * config when fields are absent).
  */
 async function postJsonAllowEmpty<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
     method: 'POST',
     credentials: 'include',
     headers: {
@@ -446,7 +477,7 @@ async function postJsonAllowEmpty<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function getJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
     credentials: 'include',
     headers: { ...authHeaders() },
   });
@@ -491,7 +522,7 @@ export async function getStudentIlePayload(
 // Lifecycle — list, version history, rename, duplicate, archive
 
 async function patchJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
     method: 'PATCH',
     credentials: 'include',
     headers: {
@@ -508,7 +539,7 @@ async function patchJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 async function deleteRequest(path: string): Promise<void> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: { ...authHeaders() },
@@ -517,6 +548,71 @@ async function deleteRequest(path: string): Promise<void> {
     const text = await res.text().catch(() => '');
     throw new Error(`API ${path} failed: ${res.status} ${res.statusText} ${text}`);
   }
+}
+
+/**
+ * fetch() wrapper that adds a transport deadline so a stalled connection
+ * or a server that accepts the body and never responds can no longer
+ * hang the UI indefinitely. Audit H9 (2026-07-28) — every REST helper
+ * previously inherited fetch's no-default-timeout behaviour.
+ *
+ * The default is 30s for ordinary JSON requests; callers can override
+ * via the `timeoutMs` option (upload/long-poll routes use their own
+ * transports). When the deadline fires we surface a typed error so
+ * the UI can render "Request timed out — retry?" instead of leaving
+ * a spinner hung forever.
+ *
+ * NOTE: AbortSignal.timeout() throws DOMException('TimeoutError') on
+ * the fetch promise — we normalise to a plain Error so call sites
+ * don't have to special-case it.
+ */
+export const DEFAULT_REST_TIMEOUT_MS = 30_000;
+
+async function fetchWithTimeout(
+  input: string | URL | Request,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+  const { timeoutMs = DEFAULT_REST_TIMEOUT_MS, ...rest } = init;
+  // Compose with any caller-provided signal so an explicit cancel
+  // still works (and so callers can chain their own deadlines on top).
+  const signal = rest.signal
+    ? anySignal([rest.signal, AbortSignal.timeout(timeoutMs)])
+    : AbortSignal.timeout(timeoutMs);
+  try {
+    return await fetch(input, { ...rest, signal });
+  } catch (err) {
+    if (
+      err instanceof DOMException &&
+      (err.name === 'TimeoutError' || err.name === 'AbortError')
+    ) {
+      // Re-thrown as a typed Error so callers don't have to special-case
+      // DOMException / TimeoutError across the file.
+      const reason = err.name === 'TimeoutError' ? 'timed out' : 'cancelled';
+      throw new Error(
+        `Request ${reason} after ${timeoutMs}ms (${typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url})`,
+      );
+    }
+    throw err;
+  }
+}
+
+/**
+ * Combine multiple AbortSignals into one. Used when the caller passes
+ * their own signal (e.g. from React useEffect cleanup) and we also
+ * need a timeout. AbortSignal.any is the modern equivalent; we fall
+ * back to manual composition for older targets.
+ */
+function anySignal(signals: AbortSignal[]): AbortSignal {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  for (const sig of signals) {
+    if (sig.aborted) {
+      controller.abort();
+      break;
+    }
+    sig.addEventListener('abort', onAbort, { once: true });
+  }
+  return controller.signal;
 }
 
 export async function listIleExperiences(
@@ -671,6 +767,11 @@ export async function uploadIleAsset(args: {
     xhr.open('POST', `${API_BASE}/interactive-experiences/assets/upload`);
     const token = getAuthToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    // Audit H9 — bound the upload to 5 minutes. Larger files
+    // (videos up to 50MB per ILE_ASSET_LIMITS) can legitimately take
+    // a couple of minutes on a slow connection; anything past that
+    // is almost certainly a stalled connection and should fail loudly.
+    xhr.timeout = 5 * 60 * 1000;
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable && args.onProgress) {
@@ -700,6 +801,8 @@ export async function uploadIleAsset(args: {
     };
     xhr.onerror = () => reject(new Error('Asset upload network error'));
     xhr.onabort = () => reject(new Error('Asset upload aborted'));
+    xhr.ontimeout = () =>
+      reject(new Error('Asset upload timed out (5 minutes — check your connection)'));
 
     const form = new FormData();
     form.append('file', args.file, args.file.name);
