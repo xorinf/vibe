@@ -73,4 +73,9 @@ export async function setupInteractiveExperiencesContainer(): Promise<void> {
       ILE_TYPES.YouTubeContextProvider,
     ),
   );
+  registry.register(
+    container.get<import('./context/providers/MarkdownContextProvider.js').MarkdownContextProvider>(
+      ILE_TYPES.MarkdownContextProvider,
+    ),
+  );
 }

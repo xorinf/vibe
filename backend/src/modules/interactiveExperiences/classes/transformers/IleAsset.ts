@@ -20,6 +20,7 @@ export const ILE_ASSET_KINDS: IleAssetKind[] = [
   'video',
   'pdf',
   'svg',
+  'markdown',
 ];
 
 /** UI display labels — kept terse for the asset-picker chip. */

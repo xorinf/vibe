@@ -786,7 +786,7 @@ export function TeacherILEWorkspace({
             state={editorState}
             api={editor}
             onSubmit={send}
-            onContextSelected={(args: { source: 'youtube'; input: string; prompt: string }) => {
+            onContextSelected={(args: { source: 'youtube' | 'markdown'; input: string; prompt: string }) => {
               if (!courseId || !courseVersionId) {
                 toast.error('Open this experience from a course item to use context.');
                 return;

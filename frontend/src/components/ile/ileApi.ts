@@ -1004,8 +1004,15 @@ export interface EditArgs {
   prompt: string;
 }
 
+/**
+ * Mirror of the backend CONTEXT_GENERATE_SOURCES union. Adding a new
+ * context provider on the backend requires adding its id here.
+ */
+export const GENERATE_FROM_CONTEXT_SOURCES = ['youtube', 'markdown'] as const;
+export type GenerateFromContextSource = (typeof GENERATE_FROM_CONTEXT_SOURCES)[number];
+
 export interface GenerateFromContextArgs {
-  source: 'youtube';
+  source: GenerateFromContextSource;
   input: string;
   prompt: string;
   courseId: string;

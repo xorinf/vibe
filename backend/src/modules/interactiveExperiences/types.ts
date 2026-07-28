@@ -20,6 +20,7 @@ const TYPES = {
   ContextProviderRegistry: Symbol.for('IleContextProviderRegistry'),
   TranscriptCleaner: Symbol.for('IleTranscriptCleaner'),
   YouTubeContextProvider: Symbol.for('YouTubeContextProvider'),
+  MarkdownContextProvider: Symbol.for('MarkdownContextProvider'),
 };
 
 export { TYPES as ILE_TYPES };

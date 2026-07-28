@@ -33,7 +33,7 @@ export interface ContextProviderMenuItem {
 const CONTEXT_PROVIDERS: ContextProviderMenuItem[] = [
   { id: 'youtube', label: 'YouTube', Icon: Youtube, enabled: true },
   { id: 'pdf', label: 'PDF', Icon: FileText, enabled: false },
-  { id: 'markdown', label: 'Markdown', Icon: FileText, enabled: false },
+  { id: 'markdown', label: 'Markdown', Icon: FileText, enabled: true },
   { id: 'website', label: 'Website', Icon: Globe, enabled: false },
   { id: 'course_item', label: 'Course Item', Icon: BookOpen, enabled: false },
   { id: 'audio', label: 'Audio', Icon: AudioLines, enabled: false },
@@ -53,7 +53,7 @@ export interface AddContextMenuProps {
    * hook in the workspace fires the generation stream from there.
    */
   onContextSelected: (args: {
-    source: 'youtube';
+    source: 'youtube' | 'markdown';
     input: string;
     prompt: string;
   }) => void;

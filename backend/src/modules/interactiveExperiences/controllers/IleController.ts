@@ -266,7 +266,7 @@ export class IleController {
    */
   @Post('/assets/upload')
   @HttpCode(201)
-  @OpenAPI({ summary: 'Upload an asset (image/audio/video/pdf/svg).' })
+  @OpenAPI({ summary: 'Upload an asset (image/audio/video/pdf/svg/markdown).' })
   async uploadAsset(
     @UploadedFile('file', { options: undefined })
     file: Express.Multer.File | undefined,

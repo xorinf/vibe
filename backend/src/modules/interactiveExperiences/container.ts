@@ -17,6 +17,7 @@ import { ContextBuilder } from './context/ContextBuilder.js';
 import { ContextProviderRegistry } from './context/ContextProviderRegistry.js';
 import { TranscriptCleaner } from './context/TranscriptCleaner.js';
 import { YouTubeContextProvider } from './context/providers/YouTubeContextProvider.js';
+import { MarkdownContextProvider } from './context/providers/MarkdownContextProvider.js';
 
 export const ileContainerModule = new ContainerModule((options) => {
   // Infrastructure: singleton keystore is bound as a value (not a type)
@@ -88,6 +89,10 @@ export const ileContainerModule = new ContainerModule((options) => {
   options
     .bind(ILE_TYPES.YouTubeContextProvider)
     .to(YouTubeContextProvider)
+    .inSingletonScope();
+  options
+    .bind(ILE_TYPES.MarkdownContextProvider)
+    .to(MarkdownContextProvider)
     .inSingletonScope();
   options.bind(ILE_TYPES.ContextBuilder).to(ContextBuilder).inSingletonScope();
 
