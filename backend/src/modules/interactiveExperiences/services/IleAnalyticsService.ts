@@ -13,6 +13,7 @@ import {
   computeDropOffCurve,
   startOfUtcDay,
 } from '../analyticsHelpers.js';
+import { ILE_EVENT_KINDS } from '../classes/validators/IleAnalyticsValidators.js';
 
 /**
  * Salt used when computing the per-student hash. We rotate this if we
@@ -20,15 +21,10 @@ import {
  */
 const STUDENT_HASH_SALT = 'vibe-ile-analytics-v1';
 
-const ALLOWED_KINDS: ReadonlySet<IleStudentEventKind> = new Set([
-  'started',
-  'progress',
-  'interaction',
-  'complete',
-  'error',
-  'resume',
-  'retry',
-]);
+// Built from the canonical ILE_EVENT_KINDS list (validator layer) —
+// that one as-const array is the single source of truth for the kind
+// set. Adding a new kind requires editing only IleAnalyticsValidators.
+const ALLOWED_KINDS: ReadonlySet<IleStudentEventKind> = new Set(ILE_EVENT_KINDS);
 
 /**
  * Compute the stable per-(student, experience) hash from a verified

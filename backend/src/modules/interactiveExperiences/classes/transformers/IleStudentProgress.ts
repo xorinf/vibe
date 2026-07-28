@@ -5,21 +5,19 @@ import {
   StringToObjectId,
 } from '#root/shared/constants/transformerConstants.js';
 import { ID } from '#root/shared/interfaces/models.js';
+import { ILE_EVENT_KINDS } from '../validators/IleAnalyticsValidators.js';
 
 /**
  * Lightweight event types emitted by the sandboxed ILE runtime.
  * Kept small on purpose — the student runtime batches these and posts
  * once every ~2s. The server stores a capped ring per (student,
  * experience) so the data set stays bounded.
+ *
+ * The union type is derived from the canonical ILE_EVENT_KINDS list
+ * exported by IleAnalyticsValidators — that one `as const` array is
+ * the single source of truth for the kind set.
  */
-export type IleStudentEventKind =
-  | 'started'
-  | 'progress'
-  | 'interaction'
-  | 'complete'
-  | 'error'
-  | 'resume'
-  | 'retry';
+export type IleStudentEventKind = (typeof ILE_EVENT_KINDS)[number];
 
 export interface IleStudentEvent {
   /** Discriminator for what happened. */
