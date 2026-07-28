@@ -37,6 +37,7 @@ import {
   ID,
   IProjectDetails,
   IFeedBackFormDetails,
+  IIeDetails,
 } from '#root/shared/interfaces/models.js';
 import { OnlyOneId } from './customValidators.js';
 
@@ -286,6 +287,50 @@ class ProjectDetailsPayloadValidator implements IProjectDetails {
   description: string;
 }
 
+/**
+ * ILE details for the itemsGroup row. The rich ILE content lives
+ * in the `interactive_experiences` collection; this row only
+ * holds the pointer + a status mirror so the section's item list
+ * reflects the latest saved state.
+ *
+ * For the initial Add Item flow, the experienceId is empty and
+ * status is 'draft' — the workspace creates the ILE doc on
+ * first save and patches the pointer back via PATCH.
+ */
+class IleDetailsPayloadValidator implements IIeDetails {
+  @JSONSchema({
+    description: 'Pointer to the rich ILE document (empty until first save).',
+    example: '60d5ec49b3f1c8e4a8f8b8c3',
+    type: 'string',
+  })
+  @IsOptional()
+  @IsString()
+  experienceId: ID;
+
+  @JSONSchema({
+    description: 'Mirror of the ILE document status.',
+    enum: ['draft', 'published', 'archived'],
+  })
+  @IsString()
+  @IsEnum(['draft', 'published', 'archived'])
+  status: 'draft' | 'published' | 'archived';
+
+  @JSONSchema({
+    description: 'Mirror of the ILE document currentVersion (1-based).',
+    example: 0,
+  })
+  @IsNumber()
+  @Min(0)
+  currentVersion: number;
+
+  @JSONSchema({
+    description: 'Mirror of the ILE document updatedAt (epoch millis).',
+    example: 1714089600000,
+  })
+  @IsNumber()
+  updatedAt: number;
+}
+
 class CreateItemBody implements Partial<IBaseItem> {
   @JSONSchema({
     description: 'Title of the item',
@@ -327,10 +372,10 @@ class CreateItemBody implements Partial<IBaseItem> {
   beforeItemId?: string;
 
   @JSONSchema({
-    description: 'Type of the item: VIDEO, BLOG, or QUIZ',
+    description: 'Type of the item: VIDEO, BLOG, QUIZ, PROJECT, FEEDBACK, or INTERACTIVE_EXPERIENCE',
     example: 'VIDEO',
     type: 'string',
-    enum: ['VIDEO', 'BLOG', 'QUIZ', 'PROJECT', 'FEEDBACK'],
+    enum: ['VIDEO', 'BLOG', 'QUIZ', 'PROJECT', 'FEEDBACK', 'INTERACTIVE_EXPERIENCE'],
   })
   @IsEnum(ItemType)
   @IsNotEmpty()
@@ -384,6 +429,16 @@ class CreateItemBody implements Partial<IBaseItem> {
   @ValidateNested()
   @Type(() => FeedBackFormPayloadValidator)
   feedbackFormDetails?: FeedBackFormPayloadValidator;
+
+  @JSONSchema({
+    description: 'Details specific to interactive experience items',
+    type: 'object',
+  })
+  @ValidateIf(o => o.type === ItemType.INTERACTIVE_EXPERIENCE)
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => IleDetailsPayloadValidator)
+  ileDetails?: IleDetailsPayloadValidator;
 }
 
 class UpdateItemBody implements Partial<IBaseItem> {
@@ -427,10 +482,10 @@ class UpdateItemBody implements Partial<IBaseItem> {
   beforeItemId?: string;
 
   @JSONSchema({
-    description: 'Type of the item: VIDEO, BLOG, QUIZ or PROJECT',
+    description: 'Type of the item: VIDEO, BLOG, QUIZ, PROJECT, FEEDBACK, or INTERACTIVE_EXPERIENCE',
     example: 'VIDEO',
     type: 'string',
-    enum: ['VIDEO', 'BLOG', 'QUIZ', 'PROJECT', 'FEEDBACK'],
+    enum: ['VIDEO', 'BLOG', 'QUIZ', 'PROJECT', 'FEEDBACK', 'INTERACTIVE_EXPERIENCE'],
   })
   @IsEnum(ItemType)
   @IsNotEmpty()
@@ -470,7 +525,7 @@ class UpdateItemBody implements Partial<IBaseItem> {
     ],
   })
   // @ValidateIf(o => o.type !== ItemType.PROJECT)
-  @IsNotEmpty()
+  @IsOptional()
   @ValidateNested()
   @Type(o => {
     if (!o) return Object;
@@ -486,6 +541,8 @@ class UpdateItemBody implements Partial<IBaseItem> {
         return ProjectDetailsPayloadValidator;
       case ItemType.FEEDBACK:
         return FeedBackFormPayloadValidator;
+      case ItemType.INTERACTIVE_EXPERIENCE:
+        return IleDetailsPayloadValidator;
       default:
         throw new Error(`Unknown item type: ${itemType}`);
     }
@@ -495,7 +552,32 @@ class UpdateItemBody implements Partial<IBaseItem> {
     | BlogDetailsPayloadValidator
     | QuizDetailsPayloadValidator
     | ProjectDetailsPayloadValidator
-    | FeedBackFormPayloadValidator;
+    | FeedBackFormPayloadValidator
+    | IleDetailsPayloadValidator;
+
+  /**
+   * Frontend ILE link-existing + workspace save flows post
+   * `ileDetails` (camelCase). The IeItem class column is named
+   * `details` (mapped via the polymorphic `details?` switch above),
+   * but the request body stays in camelCase to match the contract
+   * the teacher-page onLinkExisting + TeacherILEWorkspace ile:saved
+   * handlers expect. The repository's `$set` reads `(item as any)
+   * .ileDetails` for INTERACTIVE_EXPERIENCE items — see
+   * ItemRepository.updateItem. Without this alias, link-existing
+   * silently fails: validator strips the unknown `ileDetails` key,
+   * `details` is undefined, the repo writes `undefined` to Mongo,
+   * and the itemsGroup row's `details.experienceId` stays empty.
+   */
+  @JSONSchema({
+    description:
+      'Alias for `details` used by INTERACTIVE_EXPERIENCE items ' +
+      '(camelCase on the wire; mapped to the on-disk `details` field).',
+    oneOf: [{ $ref: '#/components/schemas/IleDetailsPayloadValidator' }],
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => IleDetailsPayloadValidator)
+  ileDetails?: IleDetailsPayloadValidator;
 }
 
 class MoveItemBody {
