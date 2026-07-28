@@ -433,13 +433,17 @@ function StudentLinkMenu() {
 }
 
 /**
- * Reads the student URL the workspace stashes on <body data-student-url>
+ * Reads the student URL the workspace stashes on <body data-student-share-url>
  * each time a publish succeeds. This keeps the popover self-contained
  * while letting the workspace own the actual experience id state.
  */
 function readStudentUrlFromDom(): string | null {
   if (typeof document === 'undefined') return null;
-  const value = document.body.dataset.studentUrl;
+  // The workspace writes `data-student-share-url` (camelCase → kebab
+  // by the DOM dataset API). Earlier revisions read `data-student-url`
+  // here, which never matched — the published-link popover always
+  // showed the placeholder. See the 2026-07-28 ILE audit H4.
+  const value = document.body.dataset.studentShareUrl;
   return value && value.length > 0 ? value : null;
 }
 

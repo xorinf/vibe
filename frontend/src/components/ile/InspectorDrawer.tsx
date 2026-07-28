@@ -36,6 +36,18 @@ export interface InspectorDrawerProps {
   onSave: () => void;
   onPublish: () => void;
   onRestoredFromHistory: (params: { html: string; title: string; currentVersion: number }) => void;
+  /**
+   * Forwarded to AssetManager's `onPick` so picking an asset from
+   * the library attaches it to the next chat message. Without this
+   * the "Use" button on each card is a no-op (logs to console).
+   * See the 2026-07-28 ILE audit H5.
+   */
+  onAttachAsset?: (asset: {
+    id: string;
+    filename: string;
+    url: string;
+    kind: 'image' | 'audio' | 'video' | 'pdf' | 'svg' | string;
+  }) => void;
   className?: string;
 }
 
@@ -65,6 +77,7 @@ export const InspectorDrawer = forwardRef<HTMLDivElement, InspectorDrawerProps>(
       onSave,
       onPublish,
       onRestoredFromHistory,
+      onAttachAsset,
       className,
     },
     ref,
@@ -109,15 +122,14 @@ export const InspectorDrawer = forwardRef<HTMLDivElement, InspectorDrawerProps>(
           )}
           {tab === 'assets' && (
             <AssetManager
-              onPick={(asset) => {
-                // The assets tab is a library; picking an asset surfaces it
-                // in the chat. The actual attachment happens via the chat
-                // pane's per-message flow — we just log here so the
-                // teacher gets feedback in the console.
+              onPick={onAttachAsset ?? ((asset) => {
+                // Fallback: no editor wired, the button still gives
+                // visible feedback so the user knows the click landed.
+                // eslint-disable-next-line no-console
                 console.info(
                   `[InspectorDrawer] Asset "${asset.filename}" available for chat context.`,
                 );
-              }}
+              })}
               className="h-full"
             />
           )}

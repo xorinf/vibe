@@ -16,7 +16,10 @@ import {
   X,
   Save,
   Loader2,
+  Eye,
+  Pencil,
 } from 'lucide-react';
+import { SandboxIframe } from './SandboxIframe';
 import { toast } from 'sonner';
 import { type CodeEditorHandle } from './CodeEditor';
 import { AiConfigPanel, AiConfigFormBody } from './AiConfigPanel';
@@ -58,6 +61,13 @@ function useSearchParamsFallback(): [URLSearchParams] {
 
 export interface TeacherILEWorkspaceProps {
   experienceId?: string;
+  /**
+   * The itemsGroup row id this workspace is bound to. When the ILE
+   * doc doesn't exist yet (the user just created an ILE item but
+   * hasn't saved it), the workspace uses this as a stable identity
+   * for the itemsGroup patch that fires after the first save.
+   */
+  itemsGroupItemId?: string;
   defaults?: {
     courseId?: string;
     courseVersionId?: string;
@@ -69,6 +79,15 @@ export interface TeacherILEWorkspaceProps {
    * The Dialog wrapper closes itself in response.
    */
   onClose?: () => void;
+  /**
+   * Reopen the workspace for the same experience without losing the
+   * dialog shell. Wired to the "Edit" chip in the header so the
+   * teacher can refresh / re-enter the workspace after saving
+   * without leaving the dialog. The dialog wrapper bumps its
+   * `mountKey` on each open transition, so calling this triggers a
+   * clean remount of the workspace.
+   */
+  onReopenForEdit?: () => void;
 }
 
 // Persisted layout — which tools (drawers) the teacher has open, and
@@ -78,8 +97,10 @@ const SPLIT_PERSIST_KEY = `${LAYOUT_STORAGE_KEY}:split`;
 
 export function TeacherILEWorkspace({
   experienceId: propExperienceId,
+  itemsGroupItemId,
   defaults,
   onClose,
+  onReopenForEdit,
 }: TeacherILEWorkspaceProps) {
   const [params] = useSearchParamsFallback();
 
@@ -134,6 +155,27 @@ export function TeacherILEWorkspace({
 
   const [manualHtml, setManualHtml] = useState<string | null>(null);
   const editorHandleRef = useRef<CodeEditorHandle | null>(null);
+
+  // Student preview — opens a small modal that mounts the saved
+  // experience HTML inside the same sandboxed iframe the student
+  // sees (injectSdk=true, so the runtime hands back progress +
+  // complete events to the modal's analytics flusher). Works for
+  // drafts and published alike; the title bar tells the teacher
+  // what they're looking at. We trigger on the *saved* experience
+  // (i.e. the one with a stable _id) so the preview always reads
+  // the canonical persisted HTML, not whatever is still in the
+  // stream buffer.
+  const [studentPreviewOpen, setStudentPreviewOpen] = useState(false);
+  // Bumping this remounts the workspace body without unmounting the
+  // dialog. Wired to the "Edit" chip in the header so the teacher
+  // can re-fetch the latest saved state (and re-bind the editor +
+  // preview) without going through the ILE library. Bumping the
+  // key on the inner component via `setEditBumpKey((k) => k + 1)`
+  // is enough — the dialog wrapper already re-keys on `open` going
+  // `false → true`, so an even simpler alternative is to close +
+  // reopen the dialog. We use the inner remount to avoid the
+  // close-then-open flash.
+  const [editBumpKey, setEditBumpKey] = useState(0);
 
   // Load persisted layout (which tools/drawers are open, inspector tab).
   useEffect(() => {
@@ -357,7 +399,10 @@ export function TeacherILEWorkspace({
     }
     setSaving(true);
     try {
-      const result = await saveIleExperience({
+      // 1. Persist the html (creates a new ILE doc on first save,
+      //    or updates the existing one). The backend returns the
+      //    canonical doc with its new _id + version.
+      const savedDraft = await saveIleExperience({
         _id: editorState.stream.experienceId,
         courseId,
         courseVersionId,
@@ -369,10 +414,69 @@ export function TeacherILEWorkspace({
         prompt: saved?.prompt,
         html,
       });
-      setSaved(result);
-      setTitle(result.title);
+
+      // 2. Immediately flip the saved draft to 'published' so
+      //    closing the workspace and returning to the course page
+      //    shows the experience as live for students. The teacher's
+      //    "Save" intent is "I'm done — make this playable" — a
+      //    separate explicit Publish step would surprise them
+      //    (the Save button already exists; the Publish button was
+      //    tucked into the ⋯ Actions menu).
+      //
+      //    Failure to publish is non-fatal: the doc is still saved
+      //    as a draft, the teacher can retry from the Actions menu.
+      let finalDoc = savedDraft;
+      try {
+        finalDoc = await publishIleExperience(savedDraft._id);
+      } catch (publishErr: any) {
+        toast.warning(
+          publishErr?.message ??
+            'Saved as draft — publish failed. Use the Actions menu to retry.',
+        );
+      }
+
+      setSaved(finalDoc);
+      setTitle(finalDoc.title);
       setLastSavedAt(new Date());
-      toast.success(editorState.stream.experienceId ? 'Draft updated' : 'Draft saved');
+      const isFresh = !editorState.stream.experienceId;
+      toast.success(
+        finalDoc.status === 'published'
+          ? isFresh
+            ? 'Saved & published — students can play it now.'
+            : 'Updated & published.'
+          : isFresh
+            ? 'Saved as draft.'
+            : 'Draft updated.',
+      );
+      // Notify the section that hosts this ILE so it can patch the
+      // itemsGroup row's details.experienceId + status + version.
+      // The teacher page listens and fires PATCH /courses/.../items/...
+      // so the section's item list mirrors the latest saved state,
+      // including the published status.
+      //
+      // NB: status flows from the post-publish doc, not the draft,
+      // so the itemsGroup row is marked published on the very first
+      // save. Detail pointer is empty when the ILE doc is first
+      // created; after the first save the ILE doc has its real _id.
+      try {
+        window.dispatchEvent(
+          new CustomEvent('ile:saved', {
+            detail: {
+              itemsGroupItemId: itemId,
+              experienceId: finalDoc._id,
+              currentVersion: finalDoc.currentVersion,
+              status: finalDoc.status ?? 'published',
+              updatedAt: finalDoc.updatedAt
+                ? new Date(finalDoc.updatedAt).getTime()
+                : Date.now(),
+            },
+          }),
+        );
+      } catch {
+        /* non-fatal: the section-level patch is a soft signal,
+           not required for correctness — the inline workspace still
+           keeps its own saved state in `saved` above */
+      }
     } catch (err: any) {
       toast.error(err?.message ?? 'Save failed');
     } finally {
@@ -595,6 +699,64 @@ export function TeacherILEWorkspace({
             <span className="hidden md:inline">Save</span>
           </Button>
 
+          {/* Student preview — opens the saved experience (or the current
+              in-progress draft if no save yet) in a sandboxed iframe
+              exactly as a student would see it. The chip is enabled
+              the moment the editor has any HTML to preview, so the
+              teacher can iterate on drafts without publishing AND see
+              the result without a round-trip through Save. The preview
+              reads the current editor content (effectiveHtml), not the
+              canonical saved HTML, so what you see matches the workspace. */}
+          {effectiveHtml.trim() ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setStudentPreviewOpen(true)}
+              className="h-8 gap-1 px-2 text-xs"
+              title="Open student preview (in-dialog)"
+              aria-label="Open student preview"
+              data-testid="ile-student-preview"
+            >
+              <Eye className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Student preview</span>
+            </Button>
+          ) : null}
+
+          {/* Refresh — re-fetches the canonical saved state from the
+              server. Useful after the teacher edits in another tab, or
+              just to "see it clean again." The workspace body re-mounts
+              on the new key, the useIleEditor hook re-initializes, the
+              editor re-binds to saved.html, and the preview re-syncs.
+
+              Available the moment there's a stable _id (i.e. after the
+              first save). For draft-only state, Refresh would just
+              re-arm the fresh-canvas and lose the in-progress HTML,
+              which is rarely what the teacher wants — so the chip is
+              gated on `saved?._id`. Use Student preview for mid-draft
+              previews instead. */}
+          {saved?._id ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                if (isDirty) {
+                  const ok = window.confirm(
+                    'Reload and lose unsaved changes?',
+                  );
+                  if (!ok) return;
+                }
+                setEditBumpKey((k) => k + 1);
+                toast.info('Reloaded the experience.');
+              }}
+              className="h-8 gap-1 px-2 text-xs text-muted-foreground  hover:text-accent-foreground"
+              title="Re-fetch the latest saved state from the server"
+              aria-label="Refresh (reload workspace)"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              <span className="hidden md:inline">Refresh</span>
+            </Button>
+          ) : null}
+
           <Button
             variant="ghost"
             size="icon"
@@ -608,8 +770,11 @@ export function TeacherILEWorkspace({
         </div>
       </header>
 
-      {/* ── BODY: ActivityBar | (ChatDrawer | Centre | InspectorDrawer) ── */}
-      <div className="flex min-h-0 flex-1">
+      {/* ── BODY: ActivityBar | (ChatDrawer | Centre | InspectorDrawer) ──
+          Keyed on `editBumpKey` so the "Edit" chip can remount the body
+          and re-fetch the latest saved state without going through the
+          ILE library. */}
+      <div className="flex min-h-0 flex-1" key={`body-${editBumpKey}`}>
         <ActivityBar
           activeTool={activeTool}
           onTool={handleTool}
@@ -684,6 +849,14 @@ export function TeacherILEWorkspace({
               setTitle(title);
               if (saved) setExperience(saved._id, html);
             }}
+            onAttachAsset={(asset) =>
+              editor.attachAsset({
+                id: asset.id,
+                filename: asset.filename,
+                url: asset.url,
+                kind: asset.kind,
+              })
+            }
           />
         )}
       </div>
@@ -721,6 +894,67 @@ export function TeacherILEWorkspace({
               }}
               onSaved={() => setAiConfigOpen(false)}
             />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Student preview modal — mounts the saved experience inside the
+          same sandboxed iframe a student would see. In-dialog so the
+          teacher can keep the workspace context (the dialog is still
+          open underneath). Closes via × or Escape; Esc-to-close is
+          built into the Radix Dialog primitive. */}
+      <Dialog
+        open={studentPreviewOpen && Boolean(saved?._id)}
+        onOpenChange={(open) => setStudentPreviewOpen(open)}
+      >
+        <DialogContent
+          className="h-[min(720px,90vh)] w-[min(960px,95vw)] gap-0 overflow-hidden border-border  bg-card  p-0 [&>button:has(>span.sr-only)]:hidden"
+          aria-describedby="ile-student-preview-description"
+        >
+          <DialogHeader className="border-b border-border  px-5 py-3">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/15 text-primary">
+                <Eye className="h-3.5 w-3.5" />
+              </span>
+              <div>
+                <DialogTitle className="text-base">Student preview</DialogTitle>
+                <p
+                  id="ile-student-preview-description"
+                  className="text-xs text-muted-foreground"
+                >
+                  {saved?.status === 'published' ? (
+                    <>
+                      {title || 'Untitled Experience'} — published, this is
+                      what students see.
+                    </>
+                  ) : (
+                    <>
+                      {title || 'Untitled Experience'} — draft preview.
+                      Students won't see this until you publish.
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="relative h-[calc(100%-65px)] w-full">
+            {/* Reads the current editor content (effectiveHtml) so the
+                preview always reflects what the teacher is editing,
+                including in-progress drafts before the first save. We
+                re-key on `effectiveHtml.length` (cheap proxy for the
+                current edit) so a Save → preview cycle reloads the
+                iframe with the freshest content. We don't gate on
+                `saved?._id` — the student preview is useful from the
+                moment there's any HTML to show. */}
+            {effectiveHtml.trim() ? (
+              <SandboxIframe
+                key={`preview-${effectiveHtml.length}`}
+                html={effectiveHtml}
+                experienceId={saved?._id}
+                injectSdk
+                className="absolute inset-0"
+              />
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

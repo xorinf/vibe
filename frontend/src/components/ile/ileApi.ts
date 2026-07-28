@@ -258,8 +258,24 @@ function bindIleStream(
 
 const API_BASE = import.meta.env.VITE_BASE_URL ?? '';
 
+/**
+ * Single source for the Firebase auth token. Use this from every
+ * site that needs the Bearer (SSE streams, XHR uploads, REST,
+ * event reporter). Replaces five ad-hoc localStorage.getItem reads
+ * that used to drift apart when token refresh paths changed.
+ */
+export function getAuthToken(): string | null {
+  try {
+    return localStorage.getItem('firebase-auth-token');
+  } catch {
+    // localStorage can throw in some privacy modes; fall back to null
+    // and let the server reject the request.
+    return null;
+  }
+}
+
 function authHeaders(): Record<string, string> {
-  const token = localStorage.getItem('firebase-auth-token');
+  const token = getAuthToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -653,7 +669,7 @@ export async function uploadIleAsset(args: {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_BASE}/interactive-experiences/assets/upload`);
-    const token = localStorage.getItem('firebase-auth-token');
+    const token = getAuthToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
     xhr.upload.onprogress = (event) => {
@@ -1007,7 +1023,7 @@ export function streamIleGeneration(
   args: GenerateArgs,
   onEvent: (event: IleStreamEvent) => void,
 ): () => void {
-  const token = localStorage.getItem('firebase-auth-token') ?? '';
+  const token = getAuthToken() ?? '';
   // fetch-based SSE — see openIleSse for why we don't use the
   // event-source-polyfill (it transparently delegates to the
   // native EventSource on modern browsers, which ignores our
@@ -1027,7 +1043,7 @@ export function streamIleEdit(
   args: EditArgs,
   onEvent: (event: IleStreamEvent) => void,
 ): () => void {
-  const token = localStorage.getItem('firebase-auth-token') ?? '';
+  const token = getAuthToken() ?? '';
   const es = openIleSse(
     `${API_BASE}/interactive-experiences/${args.experienceId}/edit/stream`,
     { prompt: args.prompt },
@@ -1046,7 +1062,7 @@ export function streamIleGenerationFromContext(
   args: GenerateFromContextArgs,
   onEvent: (event: IleStreamEvent) => void,
 ): () => void {
-  const token = localStorage.getItem('firebase-auth-token') ?? '';
+  const token = getAuthToken() ?? '';
   const es = openIleSse(
     `${API_BASE}/interactive-experiences/generate/from-context/stream`,
     args,
@@ -1076,7 +1092,7 @@ export async function askCoach(
   experienceId: string,
   prompt: string,
 ): Promise<{ hint: string }> {
-  const token = localStorage.getItem('firebase-auth-token') ?? '';
+  const token = getAuthToken() ?? '';
   const res = await fetch(
     `${API_BASE}/interactive-experiences/${experienceId}/coach`,
     {

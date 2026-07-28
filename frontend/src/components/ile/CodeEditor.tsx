@@ -8,6 +8,144 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
 
+// ─────────────────────────────────────────────────────────────────────
+// Theme tokens — read live from the parent's CSS custom properties so
+// the editor matches whatever theme the page is in. We resolve at
+// mount time AND subscribe to the `.dark` class toggle so a hot
+// theme change re-themes without remounting the editor.
+//
+// Hard-coding hex values here was the source of the "white lines in
+// dark mode" bug — the active-line highlight (#f1f5f9) bled through
+// as a glaring band, and the gutter border (#e2e8f0) was visible on
+// a dark surface. Using `hsl(var(--…) / alpha)` lets CodeMirror
+// inherit the platform palette without us re-declaring values.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Pull a token's current value from `:root` (or `.dark` if active). */
+function readCssVar(name: string, fallback: string): string {
+  if (typeof document === 'undefined') return fallback;
+  const style = getComputedStyle(document.documentElement);
+  const raw = style.getPropertyValue(name).trim();
+  return raw || fallback;
+}
+
+/**
+ * Resolve the HSL triple (e.g. `0 0% 100%`) for a token and optionally
+ * wrap it with an alpha. CodeMirror's theme API accepts any CSS color,
+ * so we hand it `hsl(var(--token) / alpha)` which is exactly what
+ * Tailwind v4 produces internally.
+ */
+function tokenColor(name: string, alpha?: number): string {
+  const hsl = readCssVar(name, '0 0% 50%');
+  return alpha === undefined
+    ? `hsl(${hsl})`
+    : `hsl(${hsl} / ${alpha})`;
+}
+
+/**
+ * Build the per-theme configuration CodeMirror needs. Called once
+ * initially, and again whenever `<html class="dark">` toggles.
+ */
+function buildThemeSpec(isDark: boolean) {
+  // Active-line highlight: in light mode a near-white wash on the
+  // editor surface; in dark mode a slightly-lighter wash on the
+  // dark editor body. Using muted/30 keeps the highlight visible
+  // without bleaching the row.
+  const activeLine = isDark
+    ? tokenColor('--muted', 0.35)
+    : tokenColor('--muted', 0.7);
+  const activeLineGutter = isDark
+    ? tokenColor('--muted', 0.5)
+    : tokenColor('--muted', 0.85);
+  // Selection: a tinted wash in primary-soft.
+  const selection = isDark
+    ? tokenColor('--primary', 0.28)
+    : tokenColor('--primary', 0.22);
+  // Gutter border: a soft divider that mirrors --border but a
+  // little darker so the gutter reads as a distinct column.
+  const gutterBorder = tokenColor('--border', isDark ? 0.5 : 0.9);
+  // Line-number color: muted enough to recede, legible enough to read.
+  const lineNumberFg = tokenColor('--muted-foreground', isDark ? 0.7 : 1);
+  // Caret: use the foreground token so it's visible against the
+  // editor's own surface.
+  const caret = tokenColor('--foreground', isDark ? 0.95 : 1);
+  // Editor background: take from --card so it sits flush with the
+  // wrapping card surface (matches the surrounding `bg-background`).
+  const editorBg = isDark
+    ? tokenColor('--card', 1)
+    : tokenColor('--background', 1);
+
+  return {
+    spec: {
+      '&': {
+        height: '100%',
+        fontSize: '13px',
+        backgroundColor: editorBg,
+        color: tokenColor('--foreground', 0.95),
+      },
+      '.cm-scroller': {
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      },
+      '.cm-content': { padding: '8px 0', caretColor: caret },
+      '.cm-gutters': {
+        background: 'transparent',
+        borderRight: `1px solid ${gutterBorder}`,
+        color: lineNumberFg,
+      },
+      '.cm-activeLineGutter': {
+        background: activeLineGutter,
+        color: tokenColor('--foreground', isDark ? 0.9 : 0.8),
+      },
+      '.cm-activeLine': { background: activeLine },
+      '.cm-selectionBackground, ::selection': { background: selection },
+      '.cm-cursor, .cm-dropCursor': { borderLeftColor: caret },
+      '.cm-searchMatch': {
+        background: tokenColor('--warm', 0.25),
+        outline: `1px solid ${tokenColor('--warm', 0.6)}`,
+      },
+      '.cm-searchMatch.cm-searchMatch-selected': {
+        background: tokenColor('--warm', 0.45),
+      },
+    },
+    isDark,
+  };
+}
+
+// Two parallel HighlightStyles so syntax colors stay legible on both
+// surfaces. Light mode = saturated mid-tones; dark mode = slightly
+// desaturated + lighter to maintain contrast on a near-black surface.
+const HTML_HIGHLIGHT_LIGHT = HighlightStyle.define([
+  { tag: t.tagName, color: '#7c3aed' },
+  { tag: t.attributeName, color: '#0ea5e9' },
+  { tag: t.attributeValue, color: '#16a34a' },
+  { tag: t.string, color: '#16a34a' },
+  { tag: t.comment, color: '#94a3b8', fontStyle: 'italic' },
+  { tag: t.content, color: '#334155' },
+  { tag: t.heading, color: '#0f172a', fontWeight: 'bold' },
+  { tag: t.emphasis, fontStyle: 'italic' },
+  { tag: t.strong, fontWeight: 'bold' },
+  { tag: t.link, color: '#2563eb', textDecoration: 'underline' },
+  { tag: t.url, color: '#2563eb' },
+  { tag: t.invalid, color: '#dc2626' },
+]);
+
+const HTML_HIGHLIGHT_DARK = HighlightStyle.define([
+  // Slightly brighter than the light-mode palette so the syntax
+  // tokens still pop against the dark `--card` surface.
+  { tag: t.tagName, color: '#a78bfa' },
+  { tag: t.attributeName, color: '#7dd3fc' },
+  { tag: t.attributeValue, color: '#86efac' },
+  { tag: t.string, color: '#86efac' },
+  { tag: t.comment, color: '#64748b', fontStyle: 'italic' },
+  { tag: t.content, color: '#cbd5e1' },
+  { tag: t.heading, color: '#f1f5f9', fontWeight: 'bold' },
+  { tag: t.emphasis, fontStyle: 'italic' },
+  { tag: t.strong, fontWeight: 'bold' },
+  { tag: t.link, color: '#93c5fd', textDecoration: 'underline' },
+  { tag: t.url, color: '#93c5fd' },
+  { tag: t.invalid, color: '#fca5a5' },
+]);
+
 export interface CodeEditorHandle {
   /** Set the editor contents (no-op if the value already matches). */
   setValue: (html: string) => void;
@@ -66,20 +204,10 @@ export interface CodeEditorProps {
   onSearchOpen?: () => void;
 }
 
-const HTML_HIGHLIGHT = HighlightStyle.define([
-  { tag: t.tagName, color: '#7c3aed' },
-  { tag: t.attributeName, color: '#0ea5e9' },
-  { tag: t.attributeValue, color: '#16a34a' },
-  { tag: t.string, color: '#16a34a' },
-  { tag: t.comment, color: '#94a3b8', fontStyle: 'italic' },
-  { tag: t.content, color: '#334155' },
-  { tag: t.heading, color: '#0f172a', fontWeight: 'bold' },
-  { tag: t.emphasis, fontStyle: 'italic' },
-  { tag: t.strong, fontWeight: 'bold' },
-  { tag: t.link, color: '#2563eb', textDecoration: 'underline' },
-  { tag: t.url, color: '#2563eb' },
-  { tag: t.invalid, color: '#dc2626' },
-]);
+// The active highlight style is chosen at mount + on theme toggle
+// (see `themeCompartment` / `highlightCompartment` below). The two
+// `HTML_HIGHLIGHT_*` constants above are the source of truth for
+// the per-theme palettes.
 
 export function CodeEditor({
   value,
@@ -100,6 +228,15 @@ export function CodeEditor({
   // the entire editor state.
   const wrapCompartment = useMemo(() => new Compartment(), []);
   const readOnlyCompartment = useMemo(() => new Compartment(), []);
+  // Theme + highlight compartments — re-configurable so a hot theme
+  // toggle re-themes the editor without remounting it.
+  const themeCompartment = useMemo(() => new Compartment(), []);
+  const highlightCompartment = useMemo(() => new Compartment(), []);
+
+  // Returns whether the parent page is currently in dark mode.
+  const readDark = () =>
+    typeof document !== 'undefined' &&
+    document.documentElement.classList.contains('dark');
 
   // Build the initial state once. Re-builds on remount only — that
   // never happens in practice because the parent keeps the ref stable.
@@ -114,6 +251,35 @@ export function CodeEditor({
       }
     });
 
+    const isDark = readDark();
+    const { spec: themeSpec } = buildThemeSpec(isDark);
+
+    // Probe the @lezer/html parser before mounting the editor. The
+    // `html()` extension registers a state field that re-parses on
+    // every doc change; for some AI-generated content with deeply
+    // nested `<style>` blocks + inline event handlers, the parser
+    // can throw an uncatchable `Cannot read properties of undefined`
+    // inside its tree walker. Rather than crash the editor and fall
+    // back to a plain `<textarea>` (which loses the dark-mode
+    // theme + line numbers + history), we detect the failure mode
+    // and skip the parser entirely. The teacher still gets a fully
+    // functional editor with all the platform theme tokens applied,
+    // they just lose colorized syntax tokens — a fair trade vs the
+    // textarea fallback.
+    let useHtmlParser = true;
+    try {
+      // The `html()` extension exposes a `languageData` field that
+      // contains a parser reference. Triggering `startParse` on a
+      // tiny doc is enough to surface the crash on first paint if
+      // the parser is broken on this content. We do the probe
+      // synchronously, just once, and bail on any throw.
+      const probe = EditorState.create({ doc: '<' });
+      const lang = (html() as unknown as { languageData?: { parser?: { startParse?: (s: EditorState) => unknown } } });
+      lang?.languageData?.parser?.startParse?.(probe);
+    } catch {
+      useHtmlParser = false;
+    }
+
     const state = EditorState.create({
       doc: value,
       extensions: [
@@ -125,14 +291,10 @@ export function CodeEditor({
         highlightActiveLine(),
         drawSelection(),
         highlightSelectionMatches(),
-        EditorView.theme({
-          '&': { height: '100%', fontSize: '13px' },
-          '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' },
-          '.cm-content': { padding: '8px 0' },
-          '.cm-gutters': { background: 'transparent', borderRight: '1px solid #e2e8f0' },
-          '.cm-activeLineGutter, .cm-activeLine': { background: '#f1f5f9' },
-          '.cm-selectionBackground, ::selection': { background: '#c7d2fe' },
-        }),
+        themeCompartment.of(EditorView.theme(themeSpec)),
+        highlightCompartment.of(
+          syntaxHighlighting(isDark ? HTML_HIGHLIGHT_DARK : HTML_HIGHLIGHT_LIGHT, { fallback: true }),
+        ),
         keymap.of([
           ...defaultKeymap,
           ...historyKeymap,
@@ -141,8 +303,8 @@ export function CodeEditor({
           indentWithTab,
         ]),
         // HTML syntax highlighting (tags/attrs/strings/comments).
-        html(),
-        syntaxHighlighting(HTML_HIGHLIGHT, { fallback: true }),
+        // Skipped if the @lezer/html parser throws on probe.
+        useHtmlParser ? html() : [],
         autocompletion(),
         // Word-wrap is a compartment so toggling it doesn't reset the
         // document. We seed the initial value to whatever the parent
@@ -169,6 +331,31 @@ export function CodeEditor({
     // other props are synced through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-theme when the parent's `.dark` class toggles. We use a
+  // MutationObserver so the change is detected even when the toggle
+  // happens outside this component (e.g. the global theme button).
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const target = document.documentElement;
+    const apply = () => {
+      const view = viewRef.current;
+      if (!view) return;
+      const isDark = readDark();
+      const { spec } = buildThemeSpec(isDark);
+      view.dispatch({
+        effects: [
+          themeCompartment.reconfigure(EditorView.theme(spec)),
+          highlightCompartment.reconfigure(
+            syntaxHighlighting(isDark ? HTML_HIGHLIGHT_DARK : HTML_HIGHLIGHT_LIGHT, { fallback: true }),
+          ),
+        ],
+      });
+    };
+    const observer = new MutationObserver(apply);
+    observer.observe(target, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, [themeCompartment, highlightCompartment]);
 
   // Sync `value` → editor content. Use a transaction so the change
   // doesn't trigger a re-emit through onChange.
@@ -234,23 +421,25 @@ export function CodeEditor({
       openSearch: () => {
         const view = viewRef.current;
         if (!view) return;
-        // CodeMirror's `openSearchPanel` is a built-in command on the
-        // search extension. We dispatch the command by name.
-        // (The exact command name is stable across CM 6.x.)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (view as any).contentDOM.dispatchEvent(
-          new CustomEvent('codemirror-search-open'),
-        );
-        // Trigger the search panel via the editor command. This is the
-        // recommended way to open the panel from a parent.
-        // @ts-expect-error — `commands` is a private module; importing it
-        // here would balloon the bundle. We reach for the command by
-        // name via the public dispatch API.
-        const cm = (view as any).editorView;
-        // Fallback: focus the editor so Ctrl+F works. Most browsers
-        // will translate ⌘F into the in-editor search via the keymap.
-        cm?.contentDOM?.dispatchEvent(
-          new KeyboardEvent('keydown', { key: 'f', metaKey: true, ctrlKey: true, bubbles: true }),
+        // CodeMirror's `openSearchPanel` is bound by `searchKeymap`
+        // (registered at line 301) to the `Mod-f` key combo, but with
+        // scope 'editor search-panel' — meaning the keymap only fires
+        // when the editor or its panel has focus. Earlier revisions
+        // dispatched a CustomEvent on `view.contentDOM` (no listener)
+        // and a synthesized KeyboardEvent on `cm?.contentDOM` (the
+        // CodeMirror keymap doesn't listen on `contentDOM` either).
+        // Both no-ops. The actual fix: focus the editor first, then
+        // dispatch the keydown on its `contentDOM` so the running
+        // keymap catches it.
+        view.focus();
+        view.contentDOM.dispatchEvent(
+          new KeyboardEvent('keydown', {
+            key: 'f',
+            metaKey: true,
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+          }),
         );
         onSearchOpen?.();
       },

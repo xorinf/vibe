@@ -1,6 +1,10 @@
 import { useCallback, useRef } from 'react';
 import { useSearch } from '@tanstack/react-router';
-import { ingestIleStudentEvents, type IleRuntimeEvent } from './ileApi';
+import {
+  getAuthToken,
+  ingestIleStudentEvents,
+  type IleRuntimeEvent,
+} from './ileApi';
 import { useAuthStore } from '@/store/auth-store';
 
 type IleAnalyticsEvent = {
@@ -31,17 +35,9 @@ export function useIleEventReporter(args: {
   };
   const authTokenRef = useRef<string | null>(null);
 
-  // Re-read the auth token from localStorage on every flush — the
-  // student may have logged in / out mid-session.
-  const readToken = useCallback((): string | null => {
-    try {
-      return localStorage.getItem('firebase-auth-token');
-    } catch {
-      // localStorage can throw in some privacy modes; fall back to
-      // null and let the server reject the request.
-      return null;
-    }
-  }, []);
+  // Re-read the auth token via the canonical ileApi helper. The student
+  // may have logged in / out mid-session.
+  const readToken = useCallback((): string | null => getAuthToken(), []);
 
   // P2-3: when no auth token is available (cold-boot race, post-logout,
   // hard refresh while unauthed), buffer the most recent batch in a
