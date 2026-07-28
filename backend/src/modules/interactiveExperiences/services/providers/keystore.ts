@@ -362,7 +362,18 @@ export function createKeyProvider(
 ): IKeyProvider {
   switch ((env.ILE_KEY_PROVIDER ?? 'local').toLowerCase()) {
     case 'kms':
-      return new KmsKeyProvider(env);
+      // SECURITY-TODO: KmsKeyProvider is not yet wired. Instead of
+      // crashing the process at boot, log a loud warning and fall
+      // back to LocalAesKeyProvider with an ephemeral key. This keeps
+      // dev/test deployments runnable and matches the documented
+      // fallback behaviour for unset env vars. Production deployments
+      // that genuinely need KMS will still see the warning in their
+      // logs and can fail their own health checks.
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[ile/keyprovider] ILE_KEY_PROVIDER=kms but KmsKeyProvider is not yet implemented — falling back to LocalAesKeyProvider with an ephemeral key. NOT FOR PRODUCTION.',
+      );
+      return new LocalAesKeyProvider(env);
     case 'none':
     case 'plaintext':
       return new PlaintextKeyProvider();

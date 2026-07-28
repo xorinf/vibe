@@ -43,7 +43,6 @@ import {
 } from '../classes/validators/IleValidators.js';
 import {
   IngestStudentEventsBody,
-  IngestStudentEventsQuery,
 } from '../classes/validators/IleAnalyticsValidators.js';
 import { GenerateFromContextBody } from '../classes/validators/ContextValidators.js';
 import {

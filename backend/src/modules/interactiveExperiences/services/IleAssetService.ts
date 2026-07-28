@@ -188,14 +188,6 @@ export class IleAssetService {
     if (!buf) return;
     const meta = readImageMeta(buf, asset.contentType);
     if (!meta) return;
-    const updated = await this.repo.patch(asset.ownerId, String(asset._id), {
-      // patch() only accepts displayName/tags/favorite today; we extend
-      // the repository with a direct field set just for metadata.
-      // To keep the patch surface narrow, we use a dedicated method
-      // exposed on the repo: updateMeta().
-      // (Patch signature reused; meta is set via updateMeta below.)
-    });
-    void updated;
     await this.repo.updateMeta(asset.ownerId, String(asset._id), {
       width: meta.width,
       height: meta.height,
@@ -606,6 +598,3 @@ function matchAttr(text: string, re: RegExp): string | undefined {
   const m = text.match(re);
   return m?.[1];
 }
-
-export { extFromMime, readImageMeta };
-export { SIGNED_URL_TTL_SECONDS };

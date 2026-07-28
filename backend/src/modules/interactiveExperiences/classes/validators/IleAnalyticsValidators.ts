@@ -5,18 +5,28 @@ import {
   IsArray,
   IsIn,
   IsInt,
-  IsNumber,
   IsObject,
   IsOptional,
-  IsString,
-  Max,
-  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
-const EVENT_KINDS = ['started', 'progress', 'interaction', 'complete', 'error', 'resume', 'retry'] as const;
+// Canonical event-kind enumeration. The runtime, the transformer
+// type, the analytics service's allowed-set, and this validator's
+// `as const` array all derive from this single source of truth —
+// see also IleStudentEventKind in classes/transformers/IleStudentProgress.ts.
+export const ILE_EVENT_KINDS = [
+  'started',
+  'progress',
+  'interaction',
+  'complete',
+  'error',
+  'resume',
+  'retry',
+] as const;
+
+const EVENT_KINDS = ILE_EVENT_KINDS;
 export type IleEventKindDto = (typeof EVENT_KINDS)[number];
 
 /**
@@ -31,11 +41,18 @@ export class IleStudentEventDto {
   @IsIn(EVENT_KINDS as unknown as string[])
   kind: IleEventKindDto;
 
-  /** Client-reported epoch ms. Best-effort; the server stamps its own. */
+  /**
+   * Client-reported epoch ms. Best-effort; the server stamps its own.
+   *
+   * Note: upper bound is intentionally NOT @Max()-decorated. The previous
+   * `@Max(Date.now() + 24h)` was evaluated at module-load time and
+   * stayed frozen at process boot — a long-running process would silently
+   * reject valid client timestamps as "too far in the future". The
+   * service-side `sanitiseEvent` clamps the upper bound per-request.
+   */
   @IsOptional()
   @IsInt()
   @Min(0)
-  @Max(Date.now() + 24 * 60 * 60 * 1000) // 24h into the future max
   clientTs?: number;
 
   /** Free-form payload. For 'progress' this is `{ percent: number }`. */
@@ -51,25 +68,4 @@ export class IngestStudentEventsBody {
   @ValidateNested({ each: true })
   @Type(() => IleStudentEventDto)
   events: IleStudentEventDto[];
-}
-
-/**
- * The student's auth token is read from the Authorization header by
- * the host (parent) page and sent as part of the body OR as a header
- * field. We accept it as a body field so the host can post it as
- * `Authorization: Bearer <token>` and the controller can extract it
- * from there — OR so the IFRAME can be told to include it via a
- * host-set window global.
- *
- * For MVP we accept it as a header field. The frontend's event
- * reporter reads `localStorage.firebase-auth-token` and sets the header.
- */
-export class IngestStudentEventsQuery {
-  @JSONSchema({
-    description: 'Optional explicit student token. If absent, server falls back to Authorization header.',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(2000)
-  token?: string;
 }

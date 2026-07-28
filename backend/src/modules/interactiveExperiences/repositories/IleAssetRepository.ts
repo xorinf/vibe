@@ -111,11 +111,4 @@ export class IleAssetRepository {
     if (!ObjectId.isValid(id)) return null;
     return (await (await this.col()).findOneAndDelete({ _id: new ObjectId(id), ownerId })) ?? null;
   }
-
-  async deleteByOwnerAndId(ownerId: string, id: string): Promise<boolean> {
-    if (!ObjectId.isValid(id)) return false;
-    const col = await this.col();
-    const result = await col.deleteOne({ _id: new ObjectId(id), ownerId });
-    return result.deletedCount > 0;
-  }
 }

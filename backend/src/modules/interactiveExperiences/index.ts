@@ -20,7 +20,6 @@ import {
 } from './classes/validators/IleValidators.js';
 import {
   IngestStudentEventsBody,
-  IngestStudentEventsQuery,
 } from './classes/validators/IleAnalyticsValidators.js';
 import { GenerateFromContextBody } from './classes/validators/ContextValidators.js';
 
@@ -41,7 +40,6 @@ export const interactiveExperiencesModuleValidators: Function[] = [
   IleAiConfigBody,
   TestIleAiConfigBody,
   IngestStudentEventsBody,
-  IngestStudentEventsQuery,
   GenerateFromContextBody,
 ];
 
