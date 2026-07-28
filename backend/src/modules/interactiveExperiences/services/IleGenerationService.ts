@@ -300,18 +300,18 @@ export class IleGenerationService {
       }
 
       // 5. Final cleanup: ensure last step fires, persist the assistant turn.
+      //    The new html + history append happen in a SINGLE Mongo write
+      //    (see repo.appendAssistantTurn) so a crash between them can't
+      //    leave the doc with stale `html` but a fresh history entry.
       fireNextStep();
 
       const finalHtml = this.normalizeHtml(html);
 
-      // Single history append — the earlier code path double-appended
-      // once via `IleHistoryTurn` and once inline via `repo.appendHistory`.
-      await this.repo.appendHistory(String(saved._id), {
+      await this.repo.appendAssistantTurn(String(saved._id), {
         role: 'assistant',
         content: 'Generated experience',
         html: finalHtml,
       });
-      await this.repo.update(String(saved._id), { html: finalHtml });
 
       sse.emit( 'done', {
         experienceId: String(saved._id),
@@ -693,9 +693,16 @@ export class IleGenerationService {
       }
 
       // Append the user's edit instruction BEFORE the next assistant turn.
+      // Cap the prompt at 16KB so a runaway input (paste of a 5MB log,
+      // adversarial upload, etc.) can't balloon the LLM request or
+      // get past the upstream timeout budget.
+      const safePrompt = args.prompt.length > 16_000
+        ? args.prompt.slice(0, 16_000) +
+          '\n\n[teacher input truncated at 16KB]'
+        : args.prompt;
       await this.repo.appendHistory(args.experienceId, {
         role: 'user',
-        content: args.prompt,
+        content: safePrompt,
       });
 
       sse.emit( 'start', { experienceId: args.experienceId });
@@ -709,7 +716,7 @@ export class IleGenerationService {
         kind: 'edit',
         experienceId: args.experienceId,
       });
-      const editUserContent = `Current HTML:\n\`\`\`html\n${existing.html}\n\`\`\`\n\nEdit instruction: ${args.prompt}\n\nReturn the full rewritten HTML document.`;
+      const editUserContent = `Current HTML:\n\`\`\`html\n${existing.html}\n\`\`\`\n\nEdit instruction: ${safePrompt}\n\nReturn the full rewritten HTML document.`;
       const stream = client.stream({
         system: await this.buildSystemPrompt(ownerId),
         messages: [{ role: 'user', content: editUserContent }],
@@ -766,8 +773,7 @@ export class IleGenerationService {
       }
 
       const finalHtml = this.normalizeHtml(html);
-      await this.repo.update(args.experienceId, { html: finalHtml });
-      await this.repo.appendHistory(args.experienceId, {
+      await this.repo.appendAssistantTurn(args.experienceId, {
         role: 'assistant',
         content: 'Applied edit',
         html: finalHtml,

@@ -86,6 +86,14 @@ export class IleAssetService {
     size: number;
     buffer: Buffer;
   }): Promise<IleAsset> {
+    // 0. Empty-buffer guard. A zero-byte upload bypasses mimetype checks
+    //    below (we have nothing to inspect), produces a useless GCS object,
+    //    and pollutes the dedup table. Reject early with the same kind
+    //    of error as an oversized upload so the UI's "upload failed"
+    //    toast surfaces it consistently.
+    if (args.size <= 0 || args.buffer.length === 0) {
+      throw new Error('Cannot upload an empty file.');
+    }
     // 1. Defensive: re-validate mimetype + size. The controller's
     //    @UploadedFile options do this, but a future caller (e.g. a
     //    CLI) might bypass the HTTP boundary.
@@ -153,28 +161,49 @@ export class IleAssetService {
       contentType: args.contentType,
     });
     seed.storageKey = storageKey;
-    const saved = await this.repo.insert(seed);
-
-    // 5. Fire-and-forget metadata extraction. We don't await so the
-    //    upload returns fast; the UI just sees `meta` populate on the
-    //    next list/refresh. Any failure is logged, never rethrown.
-    void this.extractAndPersistMetadata(saved).catch((err) => {
-      ileLog('warn', 'asset.metadata.failed', {
-        assetId: String(saved._id),
-        ownerId: saved.ownerId,
-        kind: saved.kind,
-        error: (err as Error).message,
+    try {
+      const saved = await this.repo.insert(seed);
+      // 5. Fire-and-forget metadata extraction. We don't await so the
+      //    upload returns fast; the UI just sees `meta` populate on the
+      //    next list/refresh. Any failure is logged, never rethrown.
+      void this.extractAndPersistMetadata(saved).catch((err) => {
+        ileLog('warn', 'asset.metadata.failed', {
+          assetId: String(saved._id),
+          ownerId: saved.ownerId,
+          kind: saved.kind,
+          error: (err as Error).message,
+        });
       });
-    });
 
-    ileLog('info', 'asset.upload.ok', {
-      ownerId: args.ownerId,
-      assetId: String(saved._id),
-      kind: args.kind,
-      bytes: args.size,
-      sha256,
-    });
-    return saved;
+      ileLog('info', 'asset.upload.ok', {
+        ownerId: args.ownerId,
+        assetId: String(saved._id),
+        kind: args.kind,
+        bytes: args.size,
+        sha256,
+      });
+      return saved;
+    } catch (mongoErr) {
+      // Mongo write failed after GCS upload succeeded — roll back the
+      // cloud object so we don't leak storage quota on a transient
+      // DB failure. The dedup lookup at line ~112 doesn't reach this
+      // path, so it's safe.
+      ileLog('error', 'asset.upload.mongo_failed', {
+        ownerId: args.ownerId,
+        sha256,
+        storageKey,
+        error: (mongoErr as Error).message,
+      });
+      await this.storage.delete(storageKey).catch((cleanupErr) => {
+        ileLog('error', 'asset.upload.rollback_failed', {
+          ownerId: args.ownerId,
+          storageKey,
+          mongoError: (mongoErr as Error).message,
+          cleanupError: (cleanupErr as Error).message,
+        });
+      });
+      throw mongoErr;
+    }
   }
 
   /**

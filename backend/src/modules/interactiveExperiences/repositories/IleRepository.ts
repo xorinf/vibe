@@ -65,6 +65,32 @@ export class IleRepository {
     return this.normalise(result ?? null);
   }
 
+  /**
+   * Atomically persist the assistant turn alongside the new HTML. Replaces
+   * the previous `appendHistory(...)` + `update(...)` pair in the generation
+   * pipeline, which had a window where a crash between the two writes left
+   * the history containing the new turn but the doc's `html` field still
+   * pointing at the previous version. The `edit()` path had the same race.
+   *
+   * Returns the post-write document (or null if the id is invalid).
+   */
+  async appendAssistantTurn(
+    id: string,
+    turn: { role: 'assistant'; content: string; html: string },
+  ): Promise<IleExperience | null> {
+    if (!ObjectId.isValid(id)) return null;
+    const col = await this.col();
+    const result = await col.findOneAndUpdate(
+      { _id: new ObjectId(id) },
+      {
+        $set: { html: turn.html, updatedAt: new Date() },
+        $push: { history: turn },
+      },
+      { returnDocument: 'after' },
+    );
+    return this.normalise(result ?? null);
+  }
+
   async appendHistory(
     id: string,
     turn: { role: 'user' | 'assistant'; content: string; html?: string },
