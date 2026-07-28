@@ -119,13 +119,17 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
 
       {/* Body — fullscreenRef is what we put into fullscreen so the
           floating Exit button (rendered while fullscreen is true)
-          stays visible inside the fullscreen viewport. */}
+          stays visible inside the fullscreen viewport. The wrapper
+          uses bg-muted/50 (a near-invisible slate wash in light mode,
+          a barely-there panel in dark) so the preview's white card
+          reads as a distinct surface — same role the original
+          bg-slate-900/5 was filling, but theme-aware. */}
       <div
         ref={fullscreenRef}
-        className="relative flex-1 overflow-hidden bg-slate-900/5"
+        className="relative flex-1 overflow-hidden bg-muted/50"
       >
         <div className="h-full w-full p-3">
-          <div className="relative h-full w-full overflow-hidden rounded-lg border bg-background  shadow-sm">
+          <div className="relative h-full w-full overflow-hidden rounded-lg border bg-background shadow-sm">
             {hasHtml ? (
               // Teacher-side preview: do NOT inject the runtime SDK. This
               // preview is for inspecting generated HTML, not for analytics
@@ -139,6 +143,10 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
                 injectSdk={false}
                 experienceId={undefined}
                 onError={(msg) => setRuntimeError(msg)}
+                // Teacher-side preview pane opts into same-origin so the
+                // generated HTML can use requestFullscreen(). Student
+                // paths leave the strict opaque sandbox.
+                allowSameOrigin
               />
             ) : (
               <EmptyPreview />
@@ -147,10 +155,10 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
             {/* Streaming-progress pill — shows the size of the new artifact
                 as it streams in. Sits under the (preserved) preview. */}
             {showOverlay && (
-              <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-background  px-3 py-1.5 text-xs text-foreground/80  shadow-sm ring-1 ring-ring ">
-                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
+              <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-full bg-background px-3 py-1.5 text-xs text-foreground/80 shadow-sm ring-1 ring-ring">
+                <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-ai" />
                 {state.reasoning ? 'Thinking…' : 'Editing…'}
-                <span className="text-muted-foreground/80 ">
+                <span className="text-muted-foreground/80">
                   {(state.html.length / 1024).toFixed(1)} KB
                 </span>
               </div>
@@ -159,7 +167,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
             {/* Soft dim overlay while streaming so the user can still see
                 the previous artifact behind the incoming changes. */}
             {showOverlay && state.html && (
-              <div className="pointer-events-none absolute inset-0 rounded-lg bg-background " />
+              <div className="pointer-events-none absolute inset-0 rounded-lg bg-background" />
             )}
 
             {/* Fullscreen Exit button — only shown while the preview
@@ -171,7 +179,7 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
               <button
                 type="button"
                 onClick={exitFullscreen}
-                className="absolute right-4 top-4 z-50 inline-flex items-center gap-1.5 rounded-full bg-slate-900/85 px-3.5 py-2 text-xs font-medium text-white shadow-lg ring-1 ring-white/20 backdrop-blur transition-colors hover:bg-slate-900"
+                className="absolute right-4 top-4 z-50 inline-flex items-center gap-1.5 rounded-full bg-overlay px-3.5 py-2 text-xs font-medium text-overlay-foreground shadow-lg ring-1 ring-overlay-border backdrop-blur transition-colors hover:bg-overlay-strong"
                 title="Back to workspace (Esc)"
               >
                 <X className="h-3.5 w-3.5" />
@@ -182,9 +190,14 @@ export function PreviewPane({ state, className }: PreviewPaneProps) {
         </div>
       </div>
 
-      {/* Runtime error banner (uncaught JS in the sandbox) */}
+      {/* Runtime error banner (uncaught JS in the sandbox).
+          Pair: light destructive wash + destructive text — same
+          convention as EmptyState.tsx and AuthPage.tsx. The
+          destructive foreground is reserved for solid destructive
+          surfaces (button/badge) where a near-white text is correct;
+          on a wash, use the destructive tone directly. */}
       {runtimeError && (
-        <div className="absolute left-3 right-3 top-3 flex items-start gap-2 rounded-md border border-destructive/30  bg-destructive/15  px-3 py-2 text-xs text-rose-800 shadow-sm">
+        <div className="absolute left-3 right-3 top-3 flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/15 px-3 py-2 text-xs text-destructive shadow-sm">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div className="flex-1 space-y-1">
             <p className="font-medium">Sandbox runtime error</p>
@@ -215,24 +228,30 @@ function StatusLabel({ state }: { state: IleStreamState }) {
       : state.status === 'error'
       ? 'Error'
       : 'Idle';
-  return <span className="text-[11px] text-muted-foreground/80 ">{label}</span>;
+  return <span className="text-[11px] text-muted-foreground/80">{label}</span>;
 }
 
 function EmptyPreview() {
+  // The empty state sits on top of the preview card (`bg-card`).
+  // The original gradient (`from-slate-50 to-white`) was light-only
+  // — in dark mode it would bleach the surface. `from-muted to-card`
+  // gives the same gentle wash (a hair lighter than card) and
+  // respects the active theme so the preview's "empty" state reads
+  // as a soft panel in both modes.
   return (
-    <div className="flex h-full items-center justify-center bg-gradient-to-br from-slate-50 to-white px-6 text-center">
+    <div className="flex h-full items-center justify-center bg-gradient-to-br from-muted to-card px-6 text-center">
       <div className="max-w-sm space-y-3">
-        <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-ai/40  text-primary/90 ">
+        <div className="mx-auto inline-flex h-12 w-12 items-center justify-center rounded-full bg-ai/40 text-primary/90">
           <Eye className="h-5 w-5" />
         </div>
-        <p className="text-base font-medium text-foreground ">
+        <p className="text-base font-medium text-foreground">
           Your experience will appear here
         </p>
-        <p className="text-sm text-muted-foreground ">
+        <p className="text-sm text-muted-foreground">
           Describe the lesson on the left. The AI will stream an interactive
           HTML experience into this preview as it generates.
         </p>
-        <p className="text-xs text-muted-foreground/80 ">
+        <p className="text-xs text-muted-foreground/80">
           Try: <em>"Explain binary search with a step-through visualization"</em>
         </p>
       </div>

@@ -952,6 +952,12 @@ export function TeacherILEWorkspace({
                 html={effectiveHtml}
                 experienceId={saved?._id}
                 injectSdk
+                // Teacher-side preview opts into same-origin so the
+                // generated HTML can use requestFullscreen() (Esc-to-exit).
+                // Student-side paths (StudentILEWorkspace, InlineStudentIleViewer)
+                // do NOT pass this prop — they keep the strict opaque
+                // sandbox. See SandboxIframe audit H1 (2026-07-28).
+                allowSameOrigin
                 className="absolute inset-0"
               />
             ) : null}

@@ -19,6 +19,17 @@ export interface SandboxIframeProps {
   remountKey?: number;
   /** Whether to inject the ViBe runtime SDK snippet. */
   injectSdk?: boolean;
+  /**
+   * Whether to grant `allow-same-origin` on the iframe's sandbox
+   * attribute. Defaults to `false` (secure default — opaque origin,
+   * no DOM/storage access to the parent). Teacher-side previews can
+   * opt in to `true` if they need fullscreen (which the spec only
+   * grants to same-origin documents). STUDENT-SIDE callers must
+   * leave this `false` — the audit (2026-07-28) caught this component
+   * granting same-origin unconditionally on the student path,
+   * which defeats the primary sandbox boundary.
+   */
+  allowSameOrigin?: boolean;
   className?: string;
   /**
    * Stable per-experience id, embedded into the runtime snippet so
@@ -56,6 +67,7 @@ export function SandboxIframe({
   html,
   remountKey,
   injectSdk = true,
+  allowSameOrigin = false,
   className,
   experienceId,
   onProgress,
@@ -160,13 +172,16 @@ export function SandboxIframe({
         // origin — parent cannot reach into it via DOM, and it cannot
         // read parent's storage. CSP is the second line of defence.
         // allow-scripts: let the AI's <script> blocks run.
-        // allow-same-origin: needed for the teacher's own preview so
-        // requestFullscreen() works (the spec only grants fullscreen
-        // from a same-origin document, and we want Esc-to-exit to work).
-        // The teacher-side preview is non-sensitive (it shows the
-        // teacher's own generated HTML); the student-side path keeps
-        // the strict sandbox.
-        sandbox="allow-scripts allow-same-origin"
+        // The teacher-side preview path opts INTO `allowSameOrigin` so
+        // requestFullscreen() works (Esc-to-exit needs same-origin per
+        // the spec). The student-side path keeps the strict opaque
+        // sandbox — student HTML cannot reach parent storage, DOM, or
+        // postMessage back into our app. See the audit H1 (2026-07-28).
+        sandbox={
+          allowSameOrigin
+            ? 'allow-scripts allow-same-origin'
+            : 'allow-scripts'
+        }
         srcDoc={srcdoc}
         className="h-full min-h-full w-full border-0 bg-background "
         referrerPolicy="no-referrer"
@@ -225,6 +240,29 @@ function wrapWithSandbox(
     '/api/interactive-experiences/csp-report';
   const cspPolicy = VIBE_IFRAME_CSP.replace('__VIBE_CSP_REPORT_URI__', cspReportUri);
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${cspPolicy}">`;
+
+  // Match the parent page's theme so an AI-generated HTML without an
+  // explicit dark-mode body background still reads correctly. The
+  // parent (teacher-course-page) sets `<html class="dark">` or
+  // `<html class="light">` from its theme toggle. We mirror that
+  // class on the iframe so child styles that key off `.dark` work.
+  // We also set `color-scheme: light dark` so the browser picks
+  // the right form-control + scrollbar colors, and a default
+  // `background-color` on body that defaults to a dark stage in
+  // dark mode (hsl 230 20% 7% = #12131a) and a light stage in
+  // light mode (hsl 220 16% 95% = #f0f2f4) — the platform's
+  // `--stage` token values. This means an AI-generated white HTML
+  // looks at home on either side instead of blasting white in dark.
+  const parentTheme =
+    typeof document !== 'undefined'
+      ? document.documentElement.classList.contains('dark')
+        ? 'dark'
+        : 'light'
+      : 'light';
+  const themeMeta = `<meta name="color-scheme" content="light dark">`;
+  const stageBg = parentTheme === 'dark' ? 'hsl(230 20% 7%)' : 'hsl(220 16% 95%)';
+  const defaultBodyStyle = `<style>html,body{background:${stageBg}}@media (prefers-color-scheme:dark){html:not(.light){background:hsl(230 20% 7%)}}@media (prefers-color-scheme:light){html:not(.dark){background:hsl(220 16% 95%)}}</style>`;
+
   // Substitute the placeholder with the real experience id (or '' if
   // not bound yet). The empty string is a safe default because the
   // server falls back to the path parameter.
@@ -238,17 +276,17 @@ function wrapWithSandbox(
   if (/<head[\s>]/i.test(body)) {
     body = body.replace(
       /<head([^>]*)>/i,
-      `<head$1>${cspMeta}${sdk}`,
+      `<head$1>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}`,
     );
   } else {
     // Insert a head before <html>'s body, or prepend one if no html tag.
     if (/<html[\s>]/i.test(body)) {
       body = body.replace(
         /<html([^>]*)>/i,
-        `<html$1><head>${cspMeta}${sdk}</head>`,
+        `<html$1 class="${parentTheme}"><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>`,
       );
     } else {
-      body = `<head>${cspMeta}${sdk}</head>${body}`;
+      body = `<head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>${body}`;
     }
   }
 
@@ -258,20 +296,33 @@ function wrapWithSandbox(
 function makeBlankDoc(message: string, experienceId?: string) {
   // Mirror the CSP report-uri substitution used in the main path so
   // the blank-state iframe also reports violations to the right URL.
+  // Match the parent page's theme so the "no content yet" empty
+  // state doesn't blast bright white when the teacher is in dark
+  // mode. The parent sets `<html class="dark">` or `class="light"`
+  // from its theme toggle; we mirror that on the iframe.
   const cspReportUri =
     (import.meta.env.VITE_ILE_CSP_REPORT_URI as string | undefined) ??
     '/api/interactive-experiences/csp-report';
   const cspPolicy = VIBE_IFRAME_CSP.replace('__VIBE_CSP_REPORT_URI__', cspReportUri);
+  const parentTheme =
+    typeof document !== 'undefined'
+      ? document.documentElement.classList.contains('dark')
+        ? 'dark'
+        : 'light'
+      : 'light';
+  const themeMeta = `<meta name="color-scheme" content="light dark">`;
+  const themeStyles = `<style>
+    html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+    html, body { background: ${parentTheme === 'dark' ? 'hsl(230 20% 7%)' : 'hsl(220 16% 95%)'}; color: ${parentTheme === 'dark' ? 'hsl(220 16% 97%)' : 'hsl(230 25% 12%)'}; }
+    .empty { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 14px; }
+  </style>`;
   return `<!DOCTYPE html>
-<html>
+<html class="${parentTheme}">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${cspPolicy}">
-<style>
-  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
-  .empty { display: flex; align-items: center; justify-content: center; height: 100%;
-           color: #94a3b8; font-size: 14px; background: #f8fafc; }
-</style>
+${themeMeta}
+${themeStyles}
 ${VIBE_RUNTIME_SNIPPET.replace('__VIBE_EXPERIENCE_ID_PLACEHOLDER__', experienceId ?? '')}
 </head>
 <body>
