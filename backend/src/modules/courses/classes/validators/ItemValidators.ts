@@ -522,9 +522,18 @@ class UpdateItemBody implements Partial<IBaseItem> {
         title: 'Project Details',
         description: 'Details specific to project items',
       },
+      {
+        $ref: '#/components/schemas/FeedBackFormPayloadValidator',
+        title: 'Feedback Form Details',
+        description: 'Details specific to feedback form items',
+      },
+      {
+        $ref: '#/components/schemas/IleDetailsPayloadValidator',
+        title: 'Interactive Experience Details',
+        description: 'Details specific to interactive experience items',
+      },
     ],
   })
-  // @ValidateIf(o => o.type !== ItemType.PROJECT)
   @IsOptional()
   @ValidateNested()
   @Type(o => {

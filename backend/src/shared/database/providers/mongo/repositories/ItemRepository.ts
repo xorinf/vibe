@@ -16,6 +16,7 @@ import {
   ProjectItem,
   Item,
   FeedBackFormItem,
+  IeItem,
   ItemRef,
 } from '#courses/classes/transformers/Item.js';
 import { UpdateItemBody } from '#root/modules/courses/classes/index.js';
@@ -31,6 +32,7 @@ export class ItemRepository implements IItemRepository {
   private blogCollection: Collection<BlogItem>;
   private projectCollection: Collection<ProjectItem>;
   private feedbackFormCollection: Collection<FeedBackFormItem>;
+  private ileItemCollection: Collection<IeItem>;
   private questionBankCollection: Collection<QuestionBank>;
   private questionsCollection: Collection<any>;
   private courseVersionCollection: Collection<any>;
@@ -56,6 +58,13 @@ export class ItemRepository implements IItemRepository {
     );
     this.feedbackFormCollection = await this.db.getCollection<FeedBackFormItem>(
       'feedback_forms',
+    );
+    // ILE items live alongside videos/quizzes/etc. but the rich
+    // ILE document (with the actual HTML) lives in the
+    // `interactive_experiences` collection. This row only holds the
+    // pointer + status mirror.
+    this.ileItemCollection = await this.db.getCollection<IeItem>(
+      'interactive_experience_items',
     );
 
     this.itemsGroupCollection.createIndex({ items: 1 });
@@ -181,6 +190,9 @@ export class ItemRepository implements IItemRepository {
         case ItemType.FEEDBACK:
           collection = this.feedbackFormCollection;
           break;
+        case ItemType.INTERACTIVE_EXPERIENCE:
+          collection = this.ileItemCollection;
+          break;
         default:
           throw new InternalServerError(
             `Unsupported item type: ${(item as any).type}`,
@@ -191,16 +203,31 @@ export class ItemRepository implements IItemRepository {
         { session },
       );
       if (existingItem) {
-        // Explicitly create an object with all ItemRef fields
-        const itemRef = {
+        // Explicitly create an object with all ItemRef fields.
+        // We DO NOT construct the full ItemRef class here because
+        // its constructor calls `new ObjectId(item.itemId)` which
+        // would fail on a raw itemsGroup row that doesn't carry
+        // the itemDetails wrapper. Instead we project the shape
+        // manually — the IeItem rows in `interactive_experience_items`
+        // have `details` populated after the workspace patches the
+        // pointer back (see ItemRepository.updateItem); we forward
+        // that here so the inline view can read
+        // `selectedEntity.data.details.experienceId` and skip the
+        // "Not yet generated" placeholder once a teacher has saved.
+        const itemRef: Record<string, unknown> = {
           _id: item._id,
           type: item.type,
           order: item.order,
           isHidden: item.isHidden,
           name: existingItem.name || 'Untitled',
         };
-        // console.log(`[ItemRepository] Item ${item._id} (${item.type}): name="${itemRef.name}"`);
-        filteredItems.push(itemRef);
+        if (
+          (existingItem as any).details !== undefined &&
+          (existingItem as any).details !== null
+        ) {
+          itemRef.details = (existingItem as any).details;
+        }
+        filteredItems.push(itemRef as any);
       }
     }
 
@@ -300,6 +327,9 @@ export class ItemRepository implements IItemRepository {
       case ItemType.FEEDBACK:
         collection = this.feedbackFormCollection;
         break;
+      case ItemType.INTERACTIVE_EXPERIENCE:
+        collection = this.ileItemCollection;
+        break;
       default:
         throw new Error(`Unsupported item type: ${(item as any).type}`);
     }
@@ -338,6 +368,14 @@ export class ItemRepository implements IItemRepository {
           break;
         case ItemType.FEEDBACK:
           collection = this.feedbackFormCollection;
+          break;
+        case ItemType.INTERACTIVE_EXPERIENCE:
+          // Mirror createItem's switch (line 331). Without this case
+          // the bulk path crashes on `Unsupported item type:
+          // INTERACTIVE_EXPERIENCE` for any course that contains an
+          // ILE item — cloneModules.ts and clone-course.worker.ts
+          // hit this path.
+          collection = this.ileItemCollection;
           break;
         default:
           throw new Error(`Unsupported item type: ${item.type}`);
@@ -421,6 +459,12 @@ export class ItemRepository implements IItemRepository {
                 _id: new ObjectId(found._id),
               })) as FeedBackFormItem;
               break;
+            case ItemType.INTERACTIVE_EXPERIENCE:
+              item = (await this.ileItemCollection.findOne({
+                _id: new ObjectId(found._id),
+                isDeleted: { $ne: true },
+              })) as IeItem;
+              break;
             default:
               throw new InternalServerError(`Unknown item type: ${found.type}`);
           }
@@ -459,6 +503,13 @@ export class ItemRepository implements IItemRepository {
       })) ||
       (await this.feedbackFormCollection.findOne({
         _id: objectId,
+      })) ||
+      // ILE lookup added so student-next-item / progress / clone
+      // paths don't drop ILE rows. Sibling readItem (line 392) and
+      // readItemsBySectionId both already had this case.
+      (await this.ileItemCollection.findOne({
+        _id: objectId,
+        isDeleted: { $ne: true },
       }));
 
     if (!item) {
@@ -524,6 +575,9 @@ export class ItemRepository implements IItemRepository {
       case ItemType.FEEDBACK:
         collection = this.feedbackFormCollection;
         break;
+      case ItemType.INTERACTIVE_EXPERIENCE:
+        collection = this.ileItemCollection;
+        break;
       default:
         throw new InternalServerError(
           `Unsupported item type: ${(item as any).type}`,
@@ -536,10 +590,18 @@ export class ItemRepository implements IItemRepository {
         $set: {
           name: item.name,
           description: item.description,
-          // ...(item.type === ItemType.FEEDBACK && {
           isOptional: item.isOptional,
-          // }),
-          details: item?.details,
+          // Persist `ileDetails` (camelCase from the request
+          // body + validator) into the on-disk field name
+          // `details` (the IeItem class's column). Without
+          // this mapping, the itemsGroup row's `details` is
+          // never updated when the ILE workspace patches the
+          // experienceId pointer back after the first save —
+          // the bug behind "Saved & published but Open
+          // workspace button still shows".
+          ...(item.type === ItemType.INTERACTIVE_EXPERIENCE
+            ? { details: (item as any).ileDetails }
+            : { details: (item as any).details }),
         },
       },
       { returnDocument: 'after', session },
@@ -869,6 +931,7 @@ export class ItemRepository implements IItemRepository {
         [ItemType.BLOG]: [],
         [ItemType.PROJECT]: [],
         [ItemType.FEEDBACK]: [],
+        [ItemType.INTERACTIVE_EXPERIENCE]: [],
       };
 
       for (const group of deletedItemGroups) {
@@ -902,12 +965,19 @@ export class ItemRepository implements IItemRepository {
         session,
       );
 
+      const deletedIleIds = await this.deleteAndReturnIds(
+        this.ileItemCollection,
+        { ...deletedFilter, _id: { $in: itemMap[ItemType.INTERACTIVE_EXPERIENCE] } },
+        session,
+      );
+
       // pull the items from items groups
       const allDeletedItemIds = [
         ...deletedQuizIds,
         ...deletedVideoIds,
         ...deletedBlogIds,
         ...deletedProjectIds,
+        ...deletedIleIds,
       ];
 
       if (allDeletedItemIds.length > 0) {
@@ -984,6 +1054,9 @@ export class ItemRepository implements IItemRepository {
         break;
       case ItemType.FEEDBACK:
         collection = this.feedbackFormCollection;
+        break;
+      case ItemType.INTERACTIVE_EXPERIENCE:
+        collection = this.ileItemCollection;
         break;
       default:
         throw new InternalServerError(

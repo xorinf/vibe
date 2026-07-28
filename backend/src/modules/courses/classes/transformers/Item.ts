@@ -14,9 +14,10 @@ import {
   IVideoDetails,
   IBlogDetails,
   IFeedBackFormDetails,
+  IIeDetails,
 } from '#root/shared/interfaces/models.js';
 
-export type Item = QuizItem | VideoItem | BlogItem | ProjectItem;
+export type Item = QuizItem | VideoItem | BlogItem | ProjectItem | IeItem;
 
 class QuizItem {
   @Expose()
@@ -313,6 +314,61 @@ class ProjectItem {
   }
 }
 
+/**
+ * ItemsGroup row for an Interactive Learning Experience. Mirrors the
+ * `ProjectItem` pattern — the rich ILE content lives in the
+ * `interactive_experiences` collection, and this row only holds the
+ * pointer + status mirror so the section's item list reflects the
+ * latest saved state.
+ */
+class IeItem {
+  @Expose()
+  @Transform(ObjectIdToString.transformer, { toPlainOnly: true })
+  @Transform(StringToObjectId.transformer, { toClassOnly: true })
+  _id?: ID;
+
+  @Expose()
+  name: string;
+
+  @Expose()
+  isOptional?: boolean = false;
+
+  @Expose()
+  description: string;
+
+  @Expose()
+  type: ItemType = ItemType.INTERACTIVE_EXPERIENCE;
+
+  @Expose()
+  details?: IIeDetails;
+
+  @Expose()
+  isDeleted?: boolean;
+
+  @Expose()
+  deletedAt?: Date;
+
+  @Expose()
+  isHidden?: boolean;
+
+  constructor(
+    name: string,
+    description: string,
+    _id: ID,
+    details?: IIeDetails,
+  ) {
+    this._id = _id;
+    this.type = ItemType.INTERACTIVE_EXPERIENCE;
+    this.name = name;
+    this.description = description;
+    if (details) {
+      this.details = details;
+    }
+    this.isDeleted = false;
+    this.deletedAt = undefined;
+  }
+}
+
 class ItemBase {
   @Expose()
   @Transform(ObjectIdToString.transformer, { toPlainOnly: true })
@@ -384,6 +440,25 @@ class ItemBase {
             this.itemId,
             itemBody.feedbackFormDetails,
           );
+          break;
+        case ItemType.INTERACTIVE_EXPERIENCE:
+          // itemsGroup row is just a pointer at the rich ILE doc.
+          // experienceId is empty on Add Item (the workspace creates
+          // the ILE doc on first save and patches the pointer back).
+          // Read `itemBody.ileDetails` (not `details`) — earlier
+          // revisions read `details` and silently dropped the field.
+          this.itemDetails = new IeItem(
+            itemBody.name,
+            itemBody.description,
+            this.itemId,
+            itemBody.ileDetails ?? {
+              experienceId: '',
+              status: 'draft',
+              currentVersion: 0,
+              updatedAt: Date.now(),
+            },
+          );
+          break;
         default:
           break;
       }
@@ -421,11 +496,32 @@ class ItemRef {
   @Expose()
   name: string;
 
+  /**
+   * Per-type details (only populated for the row in question, not
+   * the full itemsGroup document). Currently only ILE items carry
+   * this in the section tree — the rich ILE content lives in the
+   * `interactive_experiences` collection, so the itemsGroup row
+   * only needs the `{ experienceId, status, currentVersion, updatedAt }`
+   * pointer. Without exposing this, the inline view can't tell
+   * whether an ILE item has been generated yet and falls back to
+   * the empty "Not yet generated — click Edit" placeholder even
+   * after the teacher has saved & published.
+   *
+   * Optional + typed loosely (any) because ProjectItem etc. have
+   * their own detail shapes and we don't want to widen the
+   * ItemRef contract until the other types need it.
+   */
+  @Expose()
+  details?: any;
+
   constructor(item: ItemBase) {
     this._id = new ObjectId(item.itemId);
     this.type = item.type;
     this.order = item.order;
     this.name = item.itemDetails.name;
+    if (item.itemDetails && (item.itemDetails as any).details !== undefined) {
+      this.details = (item.itemDetails as any).details;
+    }
   }
 }
 
@@ -479,6 +575,7 @@ export {
   VideoItem,
   BlogItem,
   ProjectItem,
+  IeItem,
   FeedBackFormItem,
   FeedbackSubmissionItem,
 };
