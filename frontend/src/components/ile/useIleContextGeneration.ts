@@ -59,7 +59,35 @@ export function useIleContextGeneration(): UseIleContextGenerationApi {
     cancelRef.current?.();
     setState({ ...initial, status: 'streaming' });
 
+    // Safety net: if neither `done` nor `error` ever arrives (the
+    // connection drops silently), force the state out of
+    // `'streaming'` after 90s. This mirrors the watchdog on the
+    // background FIFO queue (`ileStreamQueue.ts`) and prevents
+    // the same "stuck streaming" symptom from appearing on the
+    // context-driven path, which doesn't go through the queue.
+    let watchdogFired = false;
+    const watchdog = setTimeout(() => {
+      watchdogFired = true;
+      setState((prev) =>
+        prev.status === 'streaming'
+          ? {
+              ...prev,
+              status: 'error',
+              error:
+                'Stream stalled (no events for 90s). The provider may have dropped the connection.',
+            }
+          : prev,
+      );
+    }, 90_000);
+
     const onEvent = (ev: IleStreamEvent) => {
+      if (watchdogFired) return; // already settled; ignore late events
+      switch (ev.kind) {
+        case 'done':
+        case 'error':
+          clearTimeout(watchdog);
+          break;
+      }
       setState((prev) => {
         switch (ev.kind) {
           case 'start':
@@ -97,7 +125,10 @@ export function useIleContextGeneration(): UseIleContextGenerationApi {
     };
 
     const cancel = streamIleGenerationFromContext(args, onEvent);
-    cancelRef.current = cancel;
+    cancelRef.current = () => {
+      clearTimeout(watchdog);
+      cancel();
+    };
     return cancel;
   }, []);
 

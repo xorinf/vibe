@@ -64,6 +64,7 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/utils/utils";
 import { QuestionUploadDialog } from "@/components/question-upload-dialog";
 import { IleWorkspaceDialog } from "@/components/ile/IleWorkspaceDialog";
+import { IleInlineView } from "@/components/ile/IleInlineView";
 import ConfirmationModal from "./components/confirmation-modal";
 import { useMatches, Link } from "@tanstack/react-router";
 import {
@@ -1920,6 +1921,7 @@ function TeacherCourseContent() {
                               <SidebarMenuSub className="ml-2">
                                 {module.sections?.map((section: any) => (
                                   <Reorder.Item
+                                    as="div"
                                     key={section.sectionId}
                                     value={section}
                                     drag={isReorderEnabled}
@@ -1996,6 +1998,7 @@ function TeacherCourseContent() {
                                               .sort((a: any, b: any) => a.order.localeCompare(b.order))
                                               .map((item: any) => (
                                                 <Reorder.Item
+                                                  as="div"
                                                   key={item._id}
                                                   value={item}
                                                   drag={isReorderEnabled}
@@ -3359,6 +3362,168 @@ function TeacherCourseContent() {
 
                         </Tabs>
                       )}
+
+                      {/* ILE item — full-width inline view. Mounted when the
+                          teacher selects an Interactive Experience item in
+                          the section tree. Replaces the generic title/desc
+                          form for ILE items (the ILE has its own canvas
+                          where the teacher edits the saved HTML, not just
+                          metadata). The key includes the current
+                          experienceId so the view re-mounts when the
+                          teacher links a different experience, ensuring
+                          the iframe gets a fresh srcdoc. */}
+                      {selectedEntity.type === "item" &&
+                        selectedEntity.data.type === "INTERACTIVE_EXPERIENCE" && (
+                          <IleInlineView
+                            key={`ile-view-${selectedEntity.data._id}-${selectedEntity.data.details?.experienceId ?? "none"}`}
+                            itemName={
+                              selectedItem.name ||
+                              selectedEntity.data.name ||
+                              "Interactive Experience"
+                            }
+                            experienceId={
+                              selectedEntity.data.details?.experienceId
+                            }
+                            onOpenWorkspace={() => {
+                              // Close the inline view, set the Dialog
+                              // context to the current itemsGroup item,
+                              // and open the full-screen workspace
+                              // Dialog. The workspace will load the ILE
+                              // doc by id if one exists, or start
+                              // fresh-canvas if not.
+                              //
+                              // Capture the existing experienceId from
+                              // the itemsGroup row BEFORE we null out
+                              // selectedEntity — the dialog renders
+                              // after that, so reading it from
+                              // `selectedEntity.data` at render time
+                              // would always see `null`.
+                              const existing =
+                                selectedEntity.data?.details?.experienceId;
+                              setSelectedEntity(null);
+                              // Pass the existing experienceId via a URL search
+                              // param so the dialog can load the doc by id.
+                              // We don't add a new context field — the
+                              // dialog's `experienceId` prop is the source
+                              // of truth and the dialog also receives
+                              // defaults.courseId/courseVersionId/itemId
+                              // for the first-save PATCH.
+                              const openUrl = new URL(window.location.href);
+                              if (existing) {
+                                openUrl.searchParams.set('experienceId', existing);
+                              } else {
+                                openUrl.searchParams.delete('experienceId');
+                              }
+                              window.history.replaceState(null, '', openUrl.toString());
+                              setIleCourseContext({
+                                courseId: courseId || "",
+                                courseVersionId: versionId || "",
+                                itemId: selectedEntity.data._id,
+                              });
+                              setIleWorkspaceOpen(true);
+                            }}
+                            onLinkExisting={async (picked) => {
+                              // PATCH the itemsGroup row with the
+                              // picked ILE pointer + status mirror.
+                              // Same payload shape the workspace's
+                              // `ile:saved` event uses, so the row
+                              // looks identical whether the teacher
+                              // saves from the workspace or links an
+                              // existing experience. The backend's
+                              // IeItem transformer expects `ileDetails`
+                              // (camelCase) per the validator; the
+                              // repository's `$set` writes it into the
+                              // on-disk `details` field. After the PATCH
+                              // returns, refresh `selectedEntity` so
+                              // the inline view re-fetches the
+                              // experience and the section tree shows
+                              // the green Published pill.
+                              if (
+                                !courseId ||
+                                !versionId ||
+                                !selectedEntity.data?._id
+                              ) {
+                                return;
+                              }
+                              try {
+                                const token = localStorage.getItem(
+                                  "firebase-auth-token",
+                                );
+                                const res = await fetch(
+                                  `/api/courses/${courseId}/versions/${versionId}/items/${selectedEntity.data._id}`,
+                                  {
+                                    method: "PUT",
+                                    credentials: "include",
+                                    headers: {
+                                      "Content-Type": "application/json",
+                                      ...(token
+                                        ? {
+                                            Authorization: `Bearer ${token}`,
+                                          }
+                                        : {}),
+                                    },
+                                    body: JSON.stringify({
+                                      type: "INTERACTIVE_EXPERIENCE",
+                                      name:
+                                        selectedItem.name ||
+                                        selectedEntity.data.name ||
+                                        "Interactive Experience",
+                                      description:
+                                        "Interactive learning experience",
+                                      ileDetails: {
+                                        experienceId: picked.experienceId,
+                                        status: picked.status,
+                                        currentVersion: picked.currentVersion,
+                                        updatedAt: picked.updatedAt,
+                                      },
+                                    }),
+                                  },
+                                );
+                                if (!res.ok) {
+                                  throw new Error(
+                                    `Link failed: ${res.status} ${res.statusText}`,
+                                  );
+                                }
+                                // Update the in-memory selected entity so
+                                // the inline view picks up the new
+                                // experienceId on the next render. The
+                                // section tree refetch below also pushes
+                                // the new pointer into the itemsGroup
+                                // backing this row.
+                                setSelectedEntity({
+                                  type: "item",
+                                  data: {
+                                    ...selectedEntity.data,
+                                    details: {
+                                      ...(selectedEntity.data.details ?? {}),
+                                      experienceId: picked.experienceId,
+                                      status: picked.status,
+                                      currentVersion: picked.currentVersion,
+                                      updatedAt: picked.updatedAt,
+                                    },
+                                  },
+                                  parentIds: selectedEntity.parentIds,
+                                });
+                                refetchVersion();
+                                if (shouldFetchItems) refetchItems();
+                              } catch (err) {
+                                // Surface via toast if available —
+                                // the inline view shows the error in
+                                // the picker, but the user may have
+                                // navigated away.
+                                // eslint-disable-next-line no-console
+                                console.error(
+                                  "[ILE] Link existing failed:",
+                                  err,
+                                );
+                                throw err;
+                              }
+                            }}
+                            onClose={() => {
+                              setSelectedEntity(null);
+                            }}
+                          />
+                        )}
 
                       {/* <CreateArticle/> */}
                       {selectedEntity.type === "item" && selectedEntity.data.type === "QUIZ" && courseId && versionId && (

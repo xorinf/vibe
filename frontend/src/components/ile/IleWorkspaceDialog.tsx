@@ -33,6 +33,14 @@ export interface IleWorkspaceDialogProps {
     courseVersionId: string;
     itemId?: string;
   };
+  /**
+   * Optional: the itemsGroup row id this workspace is bound to.
+   * When the ILE doc doesn't exist yet, the workspace still needs
+   * the itemsGroup id so the first save patches the row's
+   * `details.experienceId` correctly. The teacher-page keeps the
+   * `ileCourseContext.itemId` and passes it through here.
+   */
+  itemsGroupItemId?: string;
 }
 
 export function IleWorkspaceDialog({
@@ -40,6 +48,7 @@ export function IleWorkspaceDialog({
   onOpenChange,
   experienceId,
   defaults,
+  itemsGroupItemId,
 }: IleWorkspaceDialogProps) {
   // Re-key the inner workspace on open so each opening starts from a
   // clean editor state. Otherwise reopening the same id after closing
@@ -82,6 +91,11 @@ export function IleWorkspaceDialog({
             key={mountKey}
             experienceId={experienceId}
             defaults={defaults}
+            // itemsGroupItemId is the itemsGroup row's _id. The
+            // workspace uses it as a unique signal so the first
+            // save event (which patches the itemsGroup row's
+            // details.experienceId) can target the right row.
+            itemsGroupItemId={itemsGroupItemId}
             onClose={() => onOpenChange(false)}
           />
         </div>

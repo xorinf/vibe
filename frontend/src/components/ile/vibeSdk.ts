@@ -73,6 +73,12 @@ export const VIBE_RUNTIME_SNIPPET = `
     try { parent.postMessage(Object.assign({__vibe: true, version: window.__vibe.version, type: type, experienceId: expId}, payload ? {payload: payload} : {}), '*'); }
     catch(e){}
   }
+  // Handshake: signal the host that the runtime is alive. The host
+  // uses this to clear the 'Booting experience...' overlay. We send
+  // it once on init (after the SDK's DOM is registered) so the host
+  // never has to fall back to a timeout. Safe to fire multiple times
+  // — the host de-dupes by checking the loaded state.
+  send('${IFRAME_MSG_TYPES.READY}');
 
   // Buffered event queue — flushed by the host.
   var queue = [];

@@ -14,8 +14,8 @@ import { forwardRef } from 'react';
 import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/utils/utils';
-import type { IleStreamState } from './useIleGeneration';
-import type { IleExperienceResponse } from './ileApi';
+import type { IleStreamState } from './ileStreamState';
+import type { IleAssetKind, IleExperienceResponse } from './ileApi';
 import { MetadataPane } from './MetadataPane';
 import { HistoryPanel } from './HistoryPanel';
 import { AssetManager } from './AssetManager';
@@ -46,7 +46,7 @@ export interface InspectorDrawerProps {
     id: string;
     filename: string;
     url: string;
-    kind: 'image' | 'audio' | 'video' | 'pdf' | 'svg' | string;
+    kind: IleAssetKind;
   }) => void;
   className?: string;
 }

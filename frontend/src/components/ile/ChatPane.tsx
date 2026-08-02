@@ -1,3 +1,23 @@
+/**
+ * The left-rail chat pane for the teacher ILE workspace.
+ *
+ * Renders:
+ *   - Header with title, connection status, quick-action chips
+ *   - Streaming / idle / error editing badge
+ *   - Message bubbles (oldest first) — each bubble is user, assistant,
+ *     or "empty state" depending on context
+ *   - Composer with attached-asset chips above the input
+ *   - Stream footer (status, cost, latency) when streaming
+ *
+ * This file is one component (`ChatPane`) plus 5 internal
+ * sub-components defined inline at the bottom:
+ *   Header, EditingBadge, EmptyState, MessageBubble, FollowupPrompt,
+ *   StreamFooter. They're kept inline because they're only used here
+ * and inlining avoids 5 new files for a 700-line module that
+ * already has clear ownership. If a second consumer ever needs
+ * MessageBubble or StreamFooter, lift them to `ChatPane/MessageBubble.tsx`
+ * + `ChatPane/StreamFooter.tsx`.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Send,

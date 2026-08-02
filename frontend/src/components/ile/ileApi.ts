@@ -1,4 +1,73 @@
 /**
+ * ILE REST + SSE + type contract surface.
+ *
+ * One file by historical accident — the module was small when the
+ * feature was first built and grew in place. The intended split
+ * (TODO, not done in this pass to keep the diff focused) is:
+ *
+ *   ileApi.ts          — REST endpoints, auth, JSON helpers
+ *   ileSse.ts          — openIleSse + bindIleStream (the SSE
+ *                        transport the ILE streams use)
+ *   ileTypes.ts        — every interface + type in this file
+ *                        (IleExperienceResponse, IleStreamEvent,
+ *                        IleAssetKind, etc.)
+ *   ileAssets.ts       — asset upload / list / sign / delete
+ *   ileAnalytics.ts    — analytics + dashboard endpoints + types
+ *   ileAiConfig.ts     — provider config + testConnection
+ *   ileCoach.ts        — askCoach (separate from the workspace
+ *                        stream surface; lives in its own panel)
+ *
+ * Section index for the current monolithic file (line numbers
+ * approximate — run a search if you need the exact location):
+ *
+ *   1. SSE transport            (lines ~1–290)
+ *        openIleSse, bindIleStream, ILEStreamSource, getAuthToken
+ *   2. REST helpers              (lines ~298–560)
+ *        authHeaders, postJson/putJson/getJson/patchJson/delete,
+ *        fetchWithTimeout, anySignal
+ *   3. Experience CRUD           (lines ~494–722)
+ *        saveIleExperience, getIleExperience, publishIleExperience,
+ *        listIleExperiences, versionedSave, restoreVersion, rename,
+ *        duplicate, archive, delete
+ *   4. Experience types          (lines ~323–405)
+ *        IleContextRef, IleExperienceResponse, IleVersionListItem,
+ *        IleHistoryTurn, StudentIlePayload, SaveIleRequest
+ *   5. Assets                    (lines ~724–836)
+ *        IleAssetKind, IleAssetListItem, listIleAssets,
+ *        uploadIleAsset, getIleAssetSignedUrl, deleteIleAsset
+ *   6. Student analytics ingest  (lines ~840–956)
+ *        IleStudentEventKind, IleRuntimeEvent, ingestIleStudentEvents
+ *   7. Teacher analytics         (lines ~855–991)
+ *        ExperienceAnalytics, DropOffCurve, DashboardAnalytics, etc.,
+ *        getIleExperienceAnalytics, getIleAnalyticsDashboard,
+ *        getIleTimeSeries, getIleDropOff, getIleInsights, getIleCompare
+ *   8. AI config                 (lines ~993–1076)
+ *        IleProviderId, IleAiConfigResponse, getIleAiConfig,
+ *        saveIleAiConfig, testIleAiConfig, TEST_CONNECTION_STATUS_COPY
+ *   9. Stream types + functions  (lines ~1080–1198)
+ *        IleStreamEvent, GenerateArgs, EditArgs,
+ *        GENERATE_FROM_CONTEXT_SOURCES, streamIleGeneration,
+ *        streamIleEdit, streamIleGenerationFromContext
+ *  10. Coach                     (lines ~1201–1222)
+ *        askCoach
+ *
+ * Consumers (search these when touching this file):
+ *   - useIleEditor.ts          imports streamIleEdit, streamIleGeneration,
+ *                              getIleExperienceHistory
+ *   - useIleContextGeneration.ts imports streamIleGenerationFromContext
+ *   - AiConfigPanel.tsx         imports getIleAiConfig, saveIleAiConfig,
+ *                              testIleAiConfig, TEST_CONNECTION_STATUS_COPY
+ *   - AnalyticsPanel.tsx        imports all 4 analytics endpoints +
+ *                              ExperienceAnalytics, DashboardAnalytics
+ *   - AssetManager.tsx          imports all 4 asset endpoints
+ *   - ExperienceList.tsx        imports listIleExperiences, archive,
+ *                              unarchive, duplicate, delete
+ *   - ileStreamQueue.ts         imports streamIleEdit + streamIleGeneration
+ *                              (re-exposed to consumers)
+ *   - index.ts                  re-exports the public types
+ */
+
+/**
  * event-source-polyfill v1 silently delegates to the native
  * EventSource on modern browsers (see node_modules/event-source-
  * polyfill/src/eventsource.js:1021-1030 — `R = NativeEventSource`

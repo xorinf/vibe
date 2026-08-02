@@ -1,3 +1,15 @@
+/**
+ * CodeMirror 6 wrapper used by the centre canvas.
+ *
+ * Exposes a `CodeEditorHandle` imperative API (getValue / setValue /
+ * search / find next) so the parent (`EditorSplitPane` /
+ * `TeacherILEWorkspace`) can drive the editor without owning
+ * CodeMirror state itself.
+ *
+ * Re-themes itself when the `<html class="dark">` toggle flips
+ * (mutation observer), so dark/light mode switches are reflected
+ * without a remount.
+ */
 import { useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react';
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view';

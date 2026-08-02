@@ -715,7 +715,14 @@ class VersionItemParams {
     description: 'courseId of the item',
     type: 'string',
   })
-  @IsMongoId()
+  // ILE feature (2026-08): the picker / link-existing flows pass the
+  // frontend's `currentCourse.courseId` (a slug, not necessarily an
+  // ObjectId) into this URL. The courseId is only used by the
+  // downstream `readItem` for the enrollment lookup — `getItemAbility`
+  // gates on `versionId` and the itemsGroup read on `versionId+itemId`,
+  // so the format isn't load-bearing. Accepting any string keeps the
+  // items PATCH route compatible with the slug-style courseId the rest
+  // of the codebase already uses.
   @IsString()
   courseId: string;
 }

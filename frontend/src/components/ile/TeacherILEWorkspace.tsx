@@ -1,3 +1,35 @@
+/**
+ * The teacher ILE workspace — 3-pane shell, save/publish, AI config,
+ * auto-save, history, undo, etc. This is the load-bearing component
+ * for the entire ILE feature; every other teacher-side ILE component
+ * is either imported here or rendered as a child of it.
+ *
+ * Composition (read top-to-bottom):
+ *   - Dialog + header (title, AI config chip, save, close)
+ *   - ActivityBar (left rail)            — WorkspaceChrome
+ *   - ChatDrawer (left, when active)     — WorkspaceChrome
+ *   - CentreCanvas (centre)              — WorkspaceChrome
+ *     - EditorSplitPane                  — code/preview split
+ *     - PreviewPane                       — sandboxed iframe
+ *   - InspectorDrawer (right)            — details / history / assets /
+ *                                          analytics
+ *   - Student-preview modal              — uses SandboxIframe with
+ *                                          injectSdk so the runtime
+ *                                          hands back analytics events
+ *   - AI config Dialog                   — wraps AiConfigFormBody
+ *
+ * State ownership:
+ *   - ILE editing state  → useIleEditor  (chat, undo, html head)
+ *   - Context stream     → useIleContextGeneration (YouTube / markdown)
+ *   - Layout persistence → useWorkspaceLayout (drawers, ratio, view mode)
+ *   - ILE doc metadata   → local useState (saved, title, saving, …)
+ *
+ * Persistence: the ILE doc is owned by the backend at
+ * `/api/interactive-experiences/:id`. The itemsGroup row's
+ * `details.experienceId` pointer is the cross-collection link; the
+ * workspace's `ile:saved` window event tells the parent page to
+ * PATCH the row when a new version is saved.
+ */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams as useTanstackParams } from '@tanstack/react-router';
 import {
@@ -16,16 +48,15 @@ import {
   X,
   Save,
   Loader2,
-  Eye,
   Pencil,
 } from 'lucide-react';
-import { SandboxIframe } from './SandboxIframe';
 import { toast } from 'sonner';
 import { type CodeEditorHandle } from './CodeEditor';
 import { AiConfigPanel, AiConfigFormBody } from './AiConfigPanel';
 import { ActionsMenu } from './ActionsMenu';
 import { useIleEditor } from './useIleEditor';
 import { useIleContextGeneration } from './useIleContextGeneration';
+import { useWorkspaceLayout } from './useWorkspaceLayout';
 import {
   getIleExperience,
   saveIleExperience,
@@ -38,7 +69,6 @@ import {
   CentreCanvas,
   type ActiveTool,
 } from './WorkspaceChrome';
-import type { ViewMode } from './EditorSplitPane';
 import { InspectorDrawer, type InspectorTabId } from './InspectorDrawer';
 
 /**
@@ -79,15 +109,6 @@ export interface TeacherILEWorkspaceProps {
    * The Dialog wrapper closes itself in response.
    */
   onClose?: () => void;
-  /**
-   * Reopen the workspace for the same experience without losing the
-   * dialog shell. Wired to the "Edit" chip in the header so the
-   * teacher can refresh / re-enter the workspace after saving
-   * without leaving the dialog. The dialog wrapper bumps its
-   * `mountKey` on each open transition, so calling this triggers a
-   * clean remount of the workspace.
-   */
-  onReopenForEdit?: () => void;
 }
 
 // Persisted layout — which tools (drawers) the teacher has open, and
@@ -100,7 +121,6 @@ export function TeacherILEWorkspace({
   itemsGroupItemId,
   defaults,
   onClose,
-  onReopenForEdit,
 }: TeacherILEWorkspaceProps) {
   const [params] = useSearchParamsFallback();
 
@@ -124,12 +144,24 @@ export function TeacherILEWorkspace({
     'loading' | 'configured' | 'unconfigured'
   >('loading');
 
-  // Drawer state — at most one main tool is active at a time. The
-  // inspector is independent. Tools open and close like Cmd+Shift+P
-  // in VS Code: pick one, pick another, click again to close.
-  const [activeTool, setActiveTool] = useState<ActiveTool>(null);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTabId>('details');
+  // Drawer state (left rail tool + right inspector) and the
+  // centre canvas layout (view mode + editor ratio + word wrap).
+  // Persistence (load + write to localStorage) is owned by the
+  // hook; this component just consumes the values.
+  const {
+    activeTool,
+    setActiveTool,
+    inspectorOpen,
+    setInspectorOpen,
+    inspectorTab,
+    setInspectorTab,
+    viewMode,
+    setViewMode,
+    editorRatio,
+    setEditorRatio,
+    wordWrap,
+    setWordWrap,
+  } = useWorkspaceLayout();
 
   // Course context, pulled from defaults + URL fallback.
   const courseId = defaults?.courseId ?? params.get('courseId') ?? '';
@@ -137,89 +169,21 @@ export function TeacherILEWorkspace({
     defaults?.courseVersionId ?? params.get('courseVersionId') ?? '';
   const itemId = defaults?.itemId ?? params.get('itemId') ?? undefined;
 
-  // Centre canvas view mode + split ratio. The ratio is the % of the
-  // canvas height the editor occupies in split mode.
-  const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    if (typeof window === 'undefined') return 'split';
-    const stored = window.localStorage.getItem('ile.workspace.viewMode');
-    if (stored === 'code' || stored === 'split' || stored === 'preview') {
-      return stored as ViewMode;
-    }
-    return 'split';
-  });
-  const [editorRatio, setEditorRatio] = useState(58); // % of canvas
-
-  const [wordWrap, setWordWrap] = useState<boolean>(
-    () => window.localStorage.getItem('ile.workspace.wordWrap') !== 'false',
-  );
-
   const [manualHtml, setManualHtml] = useState<string | null>(null);
   const editorHandleRef = useRef<CodeEditorHandle | null>(null);
 
-  // Student preview — opens a small modal that mounts the saved
-  // experience HTML inside the same sandboxed iframe the student
-  // sees (injectSdk=true, so the runtime hands back progress +
-  // complete events to the modal's analytics flusher). Works for
-  // drafts and published alike; the title bar tells the teacher
-  // what they're looking at. We trigger on the *saved* experience
-  // (i.e. the one with a stable _id) so the preview always reads
-  // the canonical persisted HTML, not whatever is still in the
-  // stream buffer.
-  const [studentPreviewOpen, setStudentPreviewOpen] = useState(false);
   // Bumping this remounts the workspace body without unmounting the
-  // dialog. Wired to the "Edit" chip in the header so the teacher
-  // can re-fetch the latest saved state (and re-bind the editor +
-  // preview) without going through the ILE library. Bumping the
-  // key on the inner component via `setEditBumpKey((k) => k + 1)`
-  // is enough — the dialog wrapper already re-keys on `open` going
-  // `false → true`, so an even simpler alternative is to close +
-  // reopen the dialog. We use the inner remount to avoid the
-  // close-then-open flash.
+  // dialog. Wired to the "Edit" chip in the header so the teacher can
+  // re-fetch the latest saved state (and re-bind the editor + preview)
+  // without going through the ILE library. Bumping the key on the
+  // inner component via `setEditBumpKey((k) => k + 1)` is enough —
+  // the dialog wrapper already re-keys on `open` going `false → true`,
+  // so an even simpler alternative is to close + reopen the dialog.
+  // We use the inner remount to avoid the close-then-open flash.
   const [editBumpKey, setEditBumpKey] = useState(0);
 
-  // Load persisted layout (which tools/drawers are open, inspector tab).
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<{
-        activeTool: ActiveTool;
-        inspectorOpen: boolean;
-        inspectorTab: InspectorTabId;
-        editorRatio: number;
-      }>;
-      if (parsed.activeTool !== undefined) setActiveTool(parsed.activeTool);
-      if (typeof parsed.inspectorOpen === 'boolean') {
-        setInspectorOpen(parsed.inspectorOpen);
-      }
-      if (parsed.inspectorTab) setInspectorTab(parsed.inspectorTab);
-      if (typeof parsed.editorRatio === 'number') {
-        setEditorRatio(clamp(parsed.editorRatio, 25, 80));
-      }
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  // Persist on change.
-  useEffect(() => {
-    const t = setTimeout(() => {
-      try {
-        window.localStorage.setItem(
-          LAYOUT_STORAGE_KEY,
-          JSON.stringify({
-            activeTool,
-            inspectorOpen,
-            inspectorTab,
-            editorRatio,
-          }),
-        );
-      } catch {
-        /* ignore */
-      }
-    }, 200);
-    return () => clearTimeout(t);
-  }, [activeTool, inspectorOpen, inspectorTab, editorRatio]);
+  // Load + persist of layout state (drawers, inspector, view mode,
+  // editor ratio, word wrap) is handled by useWorkspaceLayout above.
 
   // ─────────────────────────────────────────────────────────────────
   // Save / publish / lifecycle
@@ -299,6 +263,15 @@ export function TeacherILEWorkspace({
     saved?.html ??
     '';
 
+  // True when the current effective HTML differs from the persisted
+  // saved snapshot. Used by the auto-save timer, the beforeunload
+  // guard, the close-confirm dialog, and the "Save draft" button
+  // enabled state.
+  const isDirty =
+    editorState.stream.status === 'done' &&
+    effectiveHtml.length > 0 &&
+    effectiveHtml !== (saved?.html ?? '');
+
   useEffect(() => {
     if (editorState.stream.status === 'done') {
       const streamHtml = editorState.stream.html;
@@ -324,21 +297,6 @@ export function TeacherILEWorkspace({
     [],
   );
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('ile.workspace.viewMode', viewMode);
-    } catch {
-      /* ignore */
-    }
-  }, [viewMode]);
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('ile.workspace.wordWrap', wordWrap ? '1' : '0');
-    } catch {
-      /* ignore */
-    }
-  }, [wordWrap]);
-
   // Auto-save after 1.5s of no manual edits.
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
@@ -357,11 +315,6 @@ export function TeacherILEWorkspace({
   }, [manualHtml, editorState.stream.status]);
 
   const handleSaveRef = useRef<() => Promise<void> | undefined>(undefined);
-
-  const isDirty =
-    editorState.stream.status === 'done' &&
-    effectiveHtml.length > 0 &&
-    effectiveHtml !== (saved?.html ?? '');
 
   useEffect(() => {
     if (!isDirty) return;
@@ -462,7 +415,7 @@ export function TeacherILEWorkspace({
         window.dispatchEvent(
           new CustomEvent('ile:saved', {
             detail: {
-              itemsGroupItemId: itemId,
+              itemsGroupItemId: itemsGroupItemId ?? itemId,
               experienceId: finalDoc._id,
               currentVersion: finalDoc.currentVersion,
               status: finalDoc.status ?? 'published',
@@ -699,29 +652,6 @@ export function TeacherILEWorkspace({
             <span className="hidden md:inline">Save</span>
           </Button>
 
-          {/* Student preview — opens the saved experience (or the current
-              in-progress draft if no save yet) in a sandboxed iframe
-              exactly as a student would see it. The chip is enabled
-              the moment the editor has any HTML to preview, so the
-              teacher can iterate on drafts without publishing AND see
-              the result without a round-trip through Save. The preview
-              reads the current editor content (effectiveHtml), not the
-              canonical saved HTML, so what you see matches the workspace. */}
-          {effectiveHtml.trim() ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setStudentPreviewOpen(true)}
-              className="h-8 gap-1 px-2 text-xs"
-              title="Open student preview (in-dialog)"
-              aria-label="Open student preview"
-              data-testid="ile-student-preview"
-            >
-              <Eye className="h-3.5 w-3.5" />
-              <span className="hidden md:inline">Student preview</span>
-            </Button>
-          ) : null}
-
           {/* Refresh — re-fetches the canonical saved state from the
               server. Useful after the teacher edits in another tab, or
               just to "see it clean again." The workspace body re-mounts
@@ -732,8 +662,7 @@ export function TeacherILEWorkspace({
               first save). For draft-only state, Refresh would just
               re-arm the fresh-canvas and lose the in-progress HTML,
               which is rarely what the teacher wants — so the chip is
-              gated on `saved?._id`. Use Student preview for mid-draft
-              previews instead. */}
+              gated on `saved?._id`. */}
           {saved?._id ? (
             <Button
               size="sm"
@@ -897,77 +826,6 @@ export function TeacherILEWorkspace({
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Student preview modal — mounts the saved experience inside the
-          same sandboxed iframe a student would see. In-dialog so the
-          teacher can keep the workspace context (the dialog is still
-          open underneath). Closes via × or Escape; Esc-to-close is
-          built into the Radix Dialog primitive. */}
-      <Dialog
-        open={studentPreviewOpen && Boolean(saved?._id)}
-        onOpenChange={(open) => setStudentPreviewOpen(open)}
-      >
-        <DialogContent
-          className="h-[min(720px,90vh)] w-[min(960px,95vw)] gap-0 overflow-hidden border-border  bg-card  p-0 [&>button:has(>span.sr-only)]:hidden"
-          aria-describedby="ile-student-preview-description"
-        >
-          <DialogHeader className="border-b border-border  px-5 py-3">
-            <div className="flex items-center gap-2">
-              <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-primary/15 text-primary">
-                <Eye className="h-3.5 w-3.5" />
-              </span>
-              <div>
-                <DialogTitle className="text-base">Student preview</DialogTitle>
-                <p
-                  id="ile-student-preview-description"
-                  className="text-xs text-muted-foreground"
-                >
-                  {saved?.status === 'published' ? (
-                    <>
-                      {title || 'Untitled Experience'} — published, this is
-                      what students see.
-                    </>
-                  ) : (
-                    <>
-                      {title || 'Untitled Experience'} — draft preview.
-                      Students won't see this until you publish.
-                    </>
-                  )}
-                </p>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="relative h-[calc(100%-65px)] w-full">
-            {/* Reads the current editor content (effectiveHtml) so the
-                preview always reflects what the teacher is editing,
-                including in-progress drafts before the first save. We
-                re-key on `effectiveHtml.length` (cheap proxy for the
-                current edit) so a Save → preview cycle reloads the
-                iframe with the freshest content. We don't gate on
-                `saved?._id` — the student preview is useful from the
-                moment there's any HTML to show. */}
-            {effectiveHtml.trim() ? (
-              <SandboxIframe
-                key={`preview-${effectiveHtml.length}`}
-                html={effectiveHtml}
-                experienceId={saved?._id}
-                injectSdk
-                // Teacher-side preview opts into same-origin so the
-                // generated HTML can use requestFullscreen() (Esc-to-exit).
-                // Student-side paths (StudentILEWorkspace, InlineStudentIleViewer)
-                // do NOT pass this prop — they keep the strict opaque
-                // sandbox. See SandboxIframe audit H1 (2026-07-28).
-                allowSameOrigin
-                className="absolute inset-0"
-              />
-            ) : null}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
-}
-
-function clamp(n: number, lo: number, hi: number) {
-  return Math.max(lo, Math.min(hi, n));
 }

@@ -1,9 +1,23 @@
+/**
+ * The centre canvas of the teacher ILE workspace — three-mode
+ * (code-only / split / preview-only) with a draggable splitter.
+ *
+ * Owns:
+ *   - viewMode toggle (code / split / preview)
+ *   - editor ratio (clamped 25..80% by useWorkspaceLayout)
+ *   - word-wrap toggle
+ *   - find bar (Ctrl/Cmd+F)
+ *
+ * Children: `CodeEditor` (left) and `PreviewPane` (right). The
+ * pane layout is responsive: below 768px the split collapses to
+ * a stacked tab view; above that the draggable split kicks in.
+ */
 import { useRef, useState, Component, type ReactNode, type Ref } from 'react';
 import { Code } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
 import { PreviewPane } from './PreviewPane';
-import type { IleStreamState } from './useIleGeneration';
+import type { IleStreamState } from './ileStreamState';
 import { EditorToolbar, type ViewMode } from './EditorToolbar';
 import {
   Panel,
@@ -111,7 +125,14 @@ export interface EditorSplitPaneProps {
 }
 
 const RESIZE_HANDLE_H_CLASS =
-  'group relative flex h-1 shrink-0 items-center justify-center bg-slate-200 transition-colors hover:bg-primary data-[resize-handle-state=drag]:bg-primary data-[resize-handle-state=hover]:bg-primary/60 cursor-row-resize';
+  // 1px-tall grab bar between the code and preview panels. `bg-border`
+  // sits between the two surfaces (--card + --background) so it reads
+  // as a clean divider in either theme; `hover:bg-primary` / drag /
+  // hover use the brand color so the user gets clear feedback when
+  // they're about to drag. The previous version hard-coded `bg-slate-200`,
+  // which was a bright gray band in dark mode (the second visible
+  // "white line" in the user's screenshot).
+  'group relative flex h-1 shrink-0 items-center justify-center bg-border transition-colors hover:bg-primary data-[resize-handle-state=drag]:bg-primary data-[resize-handle-state=hover]:bg-primary/60 cursor-row-resize';
 
 /**
  * The central authoring surface. Three-way view-mode toggle (Code /
@@ -193,7 +214,7 @@ export function EditorSplitPane({
                       onChange={(e) => onCodeChange(e.target.value)}
                       readOnly={isStreaming}
                       spellCheck={false}
-                      className="h-full w-full resize-none border-0 bg-card  p-3 font-mono text-xs text-foreground/80  focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-300"
+                      className="h-full w-full resize-none border-0 bg-card p-3 font-mono text-xs text-foreground/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
                       aria-label="Experience HTML source (fallback)"
                       title="CodeMirror crashed — edit here until reload"
                     />
@@ -254,7 +275,7 @@ export function EditorSplitPane({
                       onChange={(e) => onCodeChange(e.target.value)}
                       readOnly={isStreaming}
                       spellCheck={false}
-                      className="h-full w-full resize-none border-0 bg-card  p-3 font-mono text-xs text-foreground/80  focus:outline-none focus:ring-2 focus:ring-inset focus:ring-slate-300"
+                      className="h-full w-full resize-none border-0 bg-card p-3 font-mono text-xs text-foreground/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
                       aria-label="Experience HTML source (fallback)"
                       title="CodeMirror crashed — edit here until reload"
                     />

@@ -1,4 +1,5 @@
 export { TeacherILEWorkspace } from './TeacherILEWorkspace';
+export { IleInlineView } from './IleInlineView';
 export { StudentILEWorkspace } from './StudentILEWorkspace';
 export { ExperienceList } from './ExperienceList';
 export { HistoryPanel } from './HistoryPanel';
@@ -6,8 +7,7 @@ export { ActionsMenu } from './ActionsMenu';
 export { SandboxIframe } from './SandboxIframe';
 export { AiConfigPanel } from './AiConfigPanel';
 export { useIleEditor } from './useIleEditor';
-export type {
-} from './useIleGeneration';
+export type { IleStreamState } from './ileStreamState';
 export type {
   ChatMessage,
   IleEditorApi,

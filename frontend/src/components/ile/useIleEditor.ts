@@ -1,13 +1,36 @@
+/**
+ * The editor hook for the teacher ILE workspace.
+ *
+ * Owns the editor's domain state (chat history, undo/redo, asset
+ * attachments, head HTML) on top of the streaming transport. The
+ * transport itself is the FIFO queue in `ileStreamQueue.ts`; this
+ * hook is the React-facing API the workspace calls.
+ *
+ * Section index (search the file for these `// ─────` dividers):
+ *   - setExperience (line ~252)   bind to a hydrated ILE
+ *   - setFreshCanvas (line ~275)  switch to blank-canvas mode
+ *   - Hydration (line ~296)       pull server-side history once
+ *   - Send / startEditStream (line ~325)  bridge from queue to state
+ *   - Accept / Reject / Retry / Fork / Hydrate (line ~610)  version control
+ *   - Cancel (line ~697)          abort in-flight stream
+ *   - Undo / Redo (line ~717)      local-only history
+ *   - Silent-stream watchdog (line ~779)  90s idle timeout
+ *   - Cancellation on unmount (line ~858)  cleanup
+ *
+ * The hook is consumed by:
+ *   - TeacherILEWorkspace.tsx (the main 3-pane editor)
+ *   - IleInlineView in teacher-course-page.tsx (the inline preview)
+ *   - ChatPane.tsx (state.stream / state.api.send / etc.)
+ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  streamIleEdit,
-  streamIleGeneration,
   type IleStreamEvent,
   getIleExperienceHistory,
   type IleHistoryTurn,
 } from './ileApi';
+import { streamQueue } from './ileStreamQueue';
 import { resolveInstruction, type QuickActionId } from './quickActions';
-import type { IleStreamState } from './useIleGeneration';
+import type { IleStreamState } from './ileStreamState';
 import type { AttachedAsset } from './AssetAttachments';
 export type { AttachedAsset };
 
@@ -382,6 +405,12 @@ export function useIleEditor(): UseIleEditorApi {
       setEditing(true);
       setPending(false);
 
+      // Forward every SSE event to the same state-update reducer as
+      // before — the React tree (chat thread, progress pill, editor
+      // pane) all keep working unchanged. The queue's only job is
+      // to *also* settle the promise, so we have a guaranteed
+      // "this stream is done" signal that the consumer hook can
+      // await instead of relying on a state-machine transition.
       const onEvent = (ev: IleStreamEvent) => {
         setStream((prev) => {
           // Defensive: the very first event in a stream can race
@@ -466,22 +495,76 @@ export function useIleEditor(): UseIleEditorApi {
         });
       };
 
-      const cancelStream =
-        args.kind === 'edit'
-          ? streamIleEdit(
-              { experienceId: args.experienceId, prompt: args.prompt },
-              onEvent,
-            )
-          : streamIleGeneration(
-              {
-                prompt: args.prompt,
-                courseId: args.courseId,
-                courseVersionId: args.courseVersionId,
-                itemId: args.itemId,
-              },
-              onEvent,
+      // Submit to the background FIFO queue. The queue guarantees
+      // the promise will resolve (`done` event) or reject (cancel,
+      // error, transport, 90s idle watchdog) — *never* hang. That
+      // promise is what guarantees the consumer hook transitions out
+      // of `'streaming'` no matter what happens on the wire.
+      const handle = streamQueue.submit({
+        kind: args.kind,
+        prompt: args.prompt,
+        experienceId:
+          args.kind === 'edit' ? args.experienceId : undefined,
+        courseId: args.kind === 'generate' ? args.courseId : undefined,
+        courseVersionId:
+          args.kind === 'generate' ? args.courseVersionId : undefined,
+        itemId: args.kind === 'generate' ? args.itemId : undefined,
+      });
+      handle.on(onEvent);
+      cancelRef.current = () => handle.cancel();
+
+      // Belt + suspenders: also explicitly transition the React
+      // state to `'idle'` whenever the queue's promise settles
+      // (resolve OR reject). The `done` event handler above already
+      // flips to `'done'`, and the `error` handler flips to
+      // `'error'`. This catch-all covers paths where neither
+      // handler ran (watchdog, cancel mid-stream) — without it
+      // the editor would stay on `'streaming'` forever. This is
+      // the source-of-truth safety net for the "stuck streaming"
+      // bug.
+      handle.promise
+        .then(
+          () => {
+            // Success path: the 'done' event already moved us to
+            // `'done'`. Nothing more to do — but if for any reason
+            // we're still in `'streaming'` (e.g. an aborted `done`
+            // race), force the transition so the UI doesn't hang.
+            setStream((prev) =>
+              prev.status === 'streaming'
+                ? { ...prev, status: 'done' }
+                : prev,
             );
-      cancelRef.current = cancelStream;
+          },
+          (err: Error) => {
+            const isAbort =
+              err?.name === 'AbortError' ||
+              /cancel/i.test(err?.message ?? '');
+            if (isAbort) {
+              // Cancellation is intentional. Land back at idle
+              // (the user just hit "Refresh" or sent a new
+              // prompt that superseded us).
+              setStream((prev) =>
+                prev.status === 'streaming'
+                  ? { ...prev, status: 'idle' }
+                  : prev,
+              );
+              return;
+            }
+            // Real failure — show the error UI but still transition
+            // OUT of `'streaming'`. This is the fix for the
+            // "stuck streaming" symptom: even on transport failure
+            // the status flips to `error` (not stuck on `streaming`).
+            setStream((prev) =>
+              prev.status === 'streaming'
+                ? {
+                    ...prev,
+                    status: 'error',
+                    error: err.message || 'Stream failed',
+                  }
+                : prev,
+            );
+          },
+        );
     },
     [],
   );

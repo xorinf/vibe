@@ -33,7 +33,7 @@ import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { ChatPane } from './ChatPane';
 import { type CodeEditorHandle } from './CodeEditor';
 import { EditorSplitPane, type ViewMode } from './EditorSplitPane';
-import type { IleStreamState } from './useIleGeneration';
+import type { IleStreamState } from './ileStreamState';
 import { useIleEditor } from './useIleEditor';
 
 // ─────────────────────────────────────────────────────────────────────

@@ -1,3 +1,30 @@
+/**
+ * Sandboxed iframe for running ILE HTML.
+ *
+ * Two modes:
+ *   - Teacher preview: `injectSdk={false}`. No runtime SDK is
+ *     injected; synthetic teacher clicks don't reach the analytics
+ *     endpoint.
+ *   - Student player: `injectSdk={true}`. The runtime SDK is
+ *     appended to the HTML and reports progress / completion /
+ *     analytics events via postMessage.
+ *
+ * Sandbox attributes: the iframe is created with
+ * `sandbox="allow-scripts"`. By default, same-origin is NOT
+ * allowed (opaque origin; cannot reach the parent). The teacher
+ * preview opts in to same-origin via `sameOrigin` so the
+ * generated HTML can call `requestFullscreen()` (the Esc-to-exit
+ * fullscreen button). The student player keeps the strict opaque
+ * sandbox.
+ *
+ * Wire protocol (postMessage envelopes):
+ *   child → parent:  iframe:ready, iframe:complete, iframe:progress,
+ *                    iframe:error, iframe:analytics
+ *   parent → child:  reserved (no current use; handshake only)
+ *
+ * See `useIleEventReporter` for the host-side handler used by
+ * the student player.
+ */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/utils/utils';
 import {
@@ -83,6 +110,20 @@ export function SandboxIframe({
   // bump the `key` so React remounts the iframe with a fresh srcdoc.
   const lastSentRef = useRef<string>('');
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  // Fallback: if `onLoad` never fires (e.g. CSP issue, a runtime
+  // throw during init that suppresses the native load event, or the
+  // SDK handshake is missing for this path), the "Booting…"
+  // overlay would stay stuck on top of the rendered iframe
+  // content and the user sees a blank card. Force-clear the overlay
+  // after 1.5s — well below the 90s stream watchdog in
+  // useIleEditor — so the iframe content is always visible
+  // regardless of whether the postMessage handshake completed.
+  useEffect(() => {
+    if (loaded) return;
+    const t = setTimeout(() => setLoaded(true), 1500);
+    return () => clearTimeout(t);
+  }, [loaded, html, remountKey]);
 
   const srcdoc = useMemo(() => {
     const safe = html ?? '';
@@ -197,11 +238,15 @@ export function SandboxIframe({
         }}
       />
       {showOverlay && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background  backdrop-blur-[1px]">
-          <div className="flex items-center gap-2 rounded-full bg-background  px-3 py-1.5 text-xs text-muted-foreground  shadow-sm ring-1 ring-ring ">
-            <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
-            Booting experience…
-          </div>
+        // Background kept transparent so the iframe content is always
+        // visible even before the boot signal arrives. The pill is the
+        // only thing the user actually sees as a transient indicator;
+        // it sits over the top-right of the iframe so it doesn't
+        // cover the center of the experience. Click events pass
+        // through to the iframe via `pointer-events-none`.
+        <div className="pointer-events-none absolute right-3 top-3 flex items-center gap-2 rounded-full bg-background/85 px-3 py-1.5 text-xs text-muted-foreground shadow-sm ring-1 ring-ring">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-violet-500" />
+          Booting experience…
         </div>
       )}
     </div>

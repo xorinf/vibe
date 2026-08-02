@@ -110,3 +110,6 @@ ile-*.png
 backend/emulator-data/
 backend/nohup.out
 backend/scripts/sse-isolation-test.mjs
+
+# Local tmp directory (audit notes, scratch)
+tmp/

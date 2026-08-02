@@ -1,3 +1,17 @@
+/**
+ * The right-side inspector tab (Details) — title, save/publish,
+ * metadata.
+ *
+ * Owner: `InspectorDrawer` renders this when the user picks the
+ * "Details" tab. Other tabs (History, Assets, Analytics) are sibling
+ * components in their own files.
+ *
+ * The save flow is what writes the ILE doc to the backend
+ * (`POST /api/interactive-experiences`). The publish flow sets
+ * status='published' on the same doc. The dialog's
+ * `ile:saved` window event tells the parent course page to PATCH
+ * the itemsGroup row's `details.experienceId` pointer.
+ */
 import { useEffect, useState } from 'react';
 import {
   Save,
@@ -21,7 +35,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/utils/utils';
-import type { IleStreamState } from './useIleGeneration';
+import type { IleStreamState } from './ileStreamState';
 import type { IleExperienceResponse } from './ileApi';
 
 export interface MetadataPaneProps {

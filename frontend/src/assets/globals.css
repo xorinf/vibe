@@ -59,6 +59,12 @@
   --color-ai: hsl(var(--ai));
   --color-ai-foreground: hsl(var(--ai-foreground));
 
+  /* Floating-overlay palette — see --overlay in :root and .dark. */
+  --color-overlay: hsl(var(--overlay) / 0.85);
+  --color-overlay-strong: hsl(var(--overlay));
+  --color-overlay-foreground: hsl(var(--overlay-foreground));
+  --color-overlay-border: hsl(var(--overlay-border) / 0.2);
+
   --font-sans: Poppins, sans-serif;
   --font-serif: Libre Baskerville, serif;
   --font-mono: JetBrains Mono, monospace;
@@ -130,6 +136,15 @@
   --ai: 190 80% 40%;
   --ai-foreground: 0 0% 100%;
 
+  /* Overlay — used for floating controls on top of any content (the
+     fullscreen Exit button in PreviewPane, hover-cards over the
+     stage, dialog scrim, etc). Semantically inverted from the page
+     surface so it's readable against light AND dark backgrounds,
+     and works inside the always-dark `bg-stage` too. */
+  --overlay: 230 25% 8%;
+  --overlay-foreground: 60 9% 97%;
+  --overlay-border: 0 0% 100%;
+
   --radius: 0.5rem;
 }
 
@@ -187,6 +202,14 @@
   --danger-flash: 8 82% 57%;
   --ai: 190 72% 56%;
   --ai-foreground: 196 45% 11%;
+
+  /* Overlay (dark mode) — same semantics as light: floating
+     controls must be readable over any background. Dark mode keeps
+     the same near-black surface so the button feels like a single
+     tonal layer; we just nudge the foreground/contrast. */
+  --overlay: 230 25% 6%;
+  --overlay-foreground: 60 9% 97%;
+  --overlay-border: 0 0% 100%;
 }
 
 /* BASE LAYER STYLING */

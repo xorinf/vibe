@@ -310,6 +310,17 @@ export enum ItemType {
   BLOG = 'BLOG',
   PROJECT = 'PROJECT',
   FEEDBACK = 'FEEDBACK',
+  /**
+   * Interactive Learning Experience. Lives in its own
+   * `interactive_experience_items` collection (analogous to videos in
+   * `videos`, quizzes in `quizzes`, etc.) with a single
+   * `details.experienceId` pointer at the rich ILE document in
+   * `interactive_experiences`. The two are kept in sync by the ILE
+   * save handler: when the ILE doc is created/updated, the matching
+   * itemsGroup row is patched with the new id + status so the
+   * section's item list reflects the latest state.
+   */
+  INTERACTIVE_EXPERIENCE = 'INTERACTIVE_EXPERIENCE',
 }
 
 export interface IBaseItem {
@@ -318,12 +329,30 @@ export interface IBaseItem {
   description: string;
   type: ItemType;
   order: string;
-  itemDetails: IVideoDetails | IQuizDetails | IBlogDetails | IProjectDetails;
+  itemDetails: IVideoDetails | IQuizDetails | IBlogDetails | IProjectDetails | IIeDetails;
 }
 
 // Add minimal IProjectItemDetails interface for PROJECT type
 export interface IProjectDetails {
   // Add fields as needed for project items, or leave empty if none
+}
+
+/**
+ * Pointer from the itemsGroup row to the rich ILE document in
+ * `interactive_experiences`. Synced by the workspace save handler
+ * (when the ILE doc is upserted, the itemsGroup row is patched with
+ * the same id + the live status so the section list always matches
+ * the latest saved state).
+ */
+export interface IIeDetails {
+  /** The `_id` of the `interactive_experiences` doc. */
+  experienceId: ID;
+  /** Mirror of the ILE doc's status field. */
+  status: 'draft' | 'published' | 'archived';
+  /** Mirror of the ILE doc's current version count (1-based). */
+  currentVersion: number;
+  /** Mirror of the ILE doc's updatedAt (epoch millis). */
+  updatedAt: number;
 }
 
 export interface IVideoDetails {

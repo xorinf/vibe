@@ -1,9 +1,25 @@
+/**
+ * The preview side of the editor split.
+ *
+ * Wraps `SandboxIframe` with:
+ *   - Header (status, reload, fullscreen toggle, error banner)
+ *   - A `StreamStatus` chip that mirrors `state.stream.status`
+ *   - An `EmptyState` that explains the workspace is "not yet
+ *     generated" when the experience has no html yet
+ *
+ * The iframe is rendered WITHOUT the runtime SDK
+ * (`injectSdk={false}`) for teacher-side previews — synthetic
+ * teacher clicks should never reach the analytics ingest endpoint.
+ * Student-side previews (StudentILEWorkspace) pass `injectSdk` so
+ * the runtime hands back progress / complete events to the
+ * analytics flusher.
+ */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Eye, RefreshCw, Maximize2, Minimize2, X, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SandboxIframe } from './SandboxIframe';
 import { cn } from '@/utils/utils';
-import type { IleStreamState } from './useIleGeneration';
+import type { IleStreamState } from './ileStreamState';
 
 export interface PreviewPaneProps {
   state: IleStreamState;
