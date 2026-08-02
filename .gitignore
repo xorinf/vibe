@@ -99,3 +99,14 @@ backend/html/
 
 # Firebase hosting cache
 .firebase/
+
+# Local ILE debugging artifacts (playwright caches, screenshots, exports)
+.playwright-mcp/
+audit-*.png
+hover-*.png
+ile-*.png
+
+# Backend local dev artifacts
+backend/emulator-data/
+backend/nohup.out
+backend/scripts/sse-isolation-test.mjs
