@@ -29,7 +29,9 @@ import {
   RotateCcw,
   FlagTriangleRight,
   Copy,
+  Download,
   UserCheck,
+  Video,
   Headphones,
   ExternalLink,
   Megaphone,
@@ -74,6 +76,7 @@ import type { RawEnrollment } from "@/types/course.types"
 import { components } from "@/types/schema"
 import { useAnomalyStore } from "@/store/anomaly-store"
 import { ProjectSubmissionsDownloadButton } from "./components/ProjectSubmissionsDownloadButton"
+import { downloadCourseBundle } from "@/lib/course-transfer"
 import { toast } from "sonner"
 import ConfirmationModal from "./components/confirmation-modal"
 import { AnnouncementModal } from "@/components/announcements/AnnouncementModal"
@@ -1219,6 +1222,7 @@ function VersionCard({
   const { setCurrentCourseFlag } = useFlagStore()
   const { setCurrentAnomaly } = useAnomalyStore();
   const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Edit state variables 
   const [editingVersion, setEditingVersion] = useState(false)
@@ -1525,6 +1529,20 @@ function VersionCard({
     storePageAndNavigate("/teacher/courses/view")
   }
 
+  // The course's uploaded-video library, where lectures are uploaded once and
+  // then referenced by any number of lessons.
+  const viewCourseVideos = () => {
+    setCurrentCourse({
+      courseId: courseId,
+      versionId: selectedVersionId ? selectedVersionId : null,
+      moduleId: null,
+      sectionId: null,
+      itemId: null,
+      watchItemId: null,
+    })
+    storePageAndNavigate("/teacher/courses/videos")
+  }
+
   const handleGenerateLink = async () => {
     try {
       const result = await generateLinkMutation.mutateAsync({
@@ -1538,6 +1556,23 @@ function VersionCard({
       toast.error('Failed to generate link. Please try again.');
     }
   };
+  // Downloads the version as a portable bundle for import on another server.
+  const handleExportVersion = async () => {
+    if (!courseId || !selectedVersionId) {
+      toast.error('Failed to find course or version id, try again!');
+      return;
+    }
+    setIsExporting(true);
+    try {
+      const fileName = await downloadCourseBundle(courseId, selectedVersionId);
+      toast.success(`Exported as ${fileName}`);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to export this course version');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleCopy = async () => {
     try {
       if (!courseId || !selectedVersionId) {
@@ -1691,6 +1726,15 @@ function VersionCard({
                       <DropdownMenuItem onClick={() => setIsCopyModalOpen(true)}>
                         <Copy className="mr-2 h-4 w-4" />
                         Clone
+                      </DropdownMenuItem>
+
+                      <DropdownMenuItem onClick={handleExportVersion} disabled={isExporting}>
+                        {isExporting ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Download className="mr-2 h-4 w-4" />
+                        )}
+                        Export
                       </DropdownMenuItem>
 
                       <DropdownMenuItem onClick={configureCohorts}>
@@ -2034,6 +2078,15 @@ function VersionCard({
                 <Button variant="outline" size="sm" onClick={goToRegistrations} className="h-8 bg-background border-border hover:bg-accent hover:text-accent-foreground transition-all duration-300 text-xs">
                   <UserCheck className="h-3 w-3 mr-1" />
                   Registrations
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={viewCourseVideos}
+                  className="h-8 bg-background border-border hover:bg-accent hover:text-accent-foreground transition-all duration-300 text-xs"
+                >
+                  <Video className="h-3 w-3 mr-1" />
+                  Course Videos
                 </Button>
                 <Button
                   variant="outline"

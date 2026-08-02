@@ -1062,6 +1062,16 @@ export class EnrollmentService extends BaseService {
     cohort?: string,
   ) {
     return this._withTransaction(async (session: ClientSession) => {
+      if (!ObjectId.isValid(courseId) || !ObjectId.isValid(courseVersionId)) {
+        // readVersion below would throw a BSONError (surfacing as a 500) on a
+        // malformed id; treat it the same as an unknown version.
+        return {
+          enrollments: [],
+          totalCount: 0,
+          totalPages: 0,
+          currentPage: 0,
+        };
+      }
       const courseVersion = await this.courseRepo.readVersion(
         courseVersionId,
         session,
@@ -2993,6 +3003,119 @@ export class EnrollmentService extends BaseService {
       limit: safeLimit,
       totalLearners: total,
       totalPages: Math.ceil(total / safeLimit),
+      learners,
+    };
+  }
+
+  /**
+   * Returns a paginated roster of candidates who have completed a single,
+   * specific course. Backs the server-to-server integration endpoint.
+   */
+  async getCourseCompletions(
+    courseId: string,
+    page: number,
+    limit: number,
+  ): Promise<{
+    page: number;
+    limit: number;
+    totalCandidates: number;
+    totalPages: number;
+    candidates: Array<{
+      userId: string;
+      email: string;
+      name: string;
+      courseVersionId: string;
+      completedAt?: Date;
+    }>;
+  }> {
+    if (!ObjectId.isValid(courseId)) {
+      throw new BadRequestError(`Invalid courseId: ${courseId}`);
+    }
+
+    const safePage = Math.max(1, Math.floor(page) || 1);
+    const safeLimit = Math.min(Math.max(1, Math.floor(limit) || 50), 200);
+    const skip = (safePage - 1) * safeLimit;
+
+    const { total, candidates } = await this.enrollmentRepo.getCourseCompletions(
+      courseId,
+      skip,
+      safeLimit,
+    );
+
+    return {
+      page: safePage,
+      limit: safeLimit,
+      totalCandidates: total,
+      totalPages: Math.ceil(total / safeLimit),
+      candidates,
+    };
+  }
+
+  /**
+   * Returns the paginated progress roster for one course version — every
+   * active student with a completion percentage, not just those who finished.
+   * Backs the server-to-server integration endpoint.
+   *
+   * An unknown course/version or an empty cohort yields an empty page rather
+   * than an error: "nobody has started yet" is a valid answer, not a fault.
+   */
+  async getCourseVersionProgress(
+    courseId: string,
+    courseVersionId: string,
+    cohortId: string | undefined,
+    page: number,
+    limit: number,
+  ): Promise<{
+    page: number;
+    limit: number;
+    totalLearners: number;
+    totalPages: number;
+    cohortId: string | null;
+    learners: Array<{
+      userId: string;
+      email: string;
+      name: string;
+      courseVersionId: string;
+      cohortId: string | null;
+      percentCompleted: number;
+      completedItems: number;
+      totalItems: number;
+      completed: boolean;
+      completedAt?: Date;
+      enrolledAt?: Date;
+    }>;
+  }> {
+    if (!ObjectId.isValid(courseId)) {
+      throw new BadRequestError(`Invalid courseId: ${courseId}`);
+    }
+    if (!ObjectId.isValid(courseVersionId)) {
+      throw new BadRequestError(`Invalid courseVersionId: ${courseVersionId}`);
+    }
+    // Reject rather than silently ignore: a typo'd cohortId that fell through
+    // would return every cohort's rows and look like correct data.
+    if (cohortId && !ObjectId.isValid(cohortId)) {
+      throw new BadRequestError(`Invalid cohortId: ${cohortId}`);
+    }
+
+    const safePage = Math.max(1, Math.floor(page) || 1);
+    const safeLimit = Math.min(Math.max(1, Math.floor(limit) || 50), 200);
+    const skip = (safePage - 1) * safeLimit;
+
+    const { total, learners } =
+      await this.enrollmentRepo.getCourseProgressRoster(
+        courseId,
+        courseVersionId,
+        cohortId,
+        skip,
+        safeLimit,
+      );
+
+    return {
+      page: safePage,
+      limit: safeLimit,
+      totalLearners: total,
+      totalPages: Math.ceil(total / safeLimit),
+      cohortId: cohortId ?? null,
       learners,
     };
   }

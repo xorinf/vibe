@@ -1567,14 +1567,23 @@ export class EnrollmentRepository {
   ) {
     await this.init();
 
+    if (!ObjectId.isValid(courseId) || !ObjectId.isValid(courseVersionId)) {
+      return {
+        totalDocuments: 0,
+        totalPages: 0,
+        currentPage: limit > 0 ? Math.floor(skip / limit) + 1 : 1,
+        enrollments: [],
+      };
+    }
+
     const baseMatch: any = {
       courseId: { $in: [courseId, new ObjectId(courseId)] },
       courseVersionId: { $in: [courseVersionId, new ObjectId(courseVersionId)] },
     };
 
-    // if (cohort) {
-    //   baseMatch.cohortId = new ObjectId(cohort);
-    // }
+    if (cohort && ObjectId.isValid(cohort)) {
+      baseMatch.cohortId = new ObjectId(cohort);
+    }
     // else if (cohorts && cohorts.length > 0 && filter === 'STUDENT') {
     //   // baseMatch.cohortId = { $in: cohorts };
     // }
@@ -1619,6 +1628,10 @@ export class EnrollmentRepository {
               onNull: null,
             },
           },
+          // Enrollments that never recorded a progress event have no
+          // percentCompleted field; coerce so the value returned to the client
+          // and the progress sort below both see 0 rather than missing.
+          percentCompleted: { $ifNull: ['$percentCompleted', 0] },
         },
       },
       {
@@ -3679,6 +3692,31 @@ export class EnrollmentRepository {
         'Failed to fetch student enrollments for the course version',
       );
     }
+  }
+
+  /**
+   * Lightweight count of active student enrollments for a course version,
+   * across all cohorts. Used to scale the crowd-question peer-validation gate
+   * threshold to cohort size (see studentQuestions/services/crowdGate.ts) —
+   * intentionally a countDocuments rather than the fuller
+   * getVersionEnrollmentStats aggregation, since only the count is needed.
+   */
+  async countActiveStudents(
+    courseId: string,
+    courseVersionId: string,
+    session?: ClientSession,
+  ): Promise<number> {
+    await this.init();
+    return await this.enrollmentCollection.countDocuments(
+      {
+        courseId: { $in: [courseId, new ObjectId(courseId)] },
+        courseVersionId: { $in: [courseVersionId, new ObjectId(courseVersionId)] },
+        role: 'STUDENT',
+        status: { $regex: /^active$/i },
+        isDeleted: { $ne: true },
+      },
+      { session },
+    );
   }
 
   /**
@@ -6010,6 +6048,299 @@ export class EnrollmentRepository {
               },
             },
             completedCourses: 1,
+          },
+        },
+      ])
+      .toArray();
+
+    return { total, learners: learners as any };
+  }
+
+  /**
+   * Returns the paginated roster of candidates who have completed one
+   * specific course (an active STUDENT enrollment on that course with a
+   * matching `progress` record where `completed: true`).
+   *
+   * Used by the server-to-server integration endpoint so external
+   * applications can pull completions for a single course.
+   */
+  async getCourseCompletions(
+    courseId: string,
+    skip: number,
+    limit: number,
+  ): Promise<{
+    total: number;
+    candidates: Array<{
+      userId: string;
+      email: string;
+      name: string;
+      courseVersionId: string;
+      completedAt?: Date;
+    }>;
+  }> {
+    await this.init();
+
+    const matchStage = {
+      role: { $regex: /^student$/i },
+      status: { $regex: /^active$/i },
+      isDeleted: { $ne: true },
+      $expr: { $eq: [{ $toString: '$courseId' }, courseId] },
+    };
+
+    const progressLookup = {
+      $lookup: {
+        from: 'progress',
+        let: {
+          uid: '$userId',
+          cid: '$courseId',
+          cvid: '$courseVersionId',
+        },
+        pipeline: [
+          {
+            $match: {
+              $expr: {
+                $and: [
+                  { $eq: [{ $toString: '$userId' }, { $toString: '$$uid' }] },
+                  { $eq: [{ $toString: '$courseId' }, { $toString: '$$cid' }] },
+                  {
+                    $eq: [
+                      { $toString: '$courseVersionId' },
+                      { $toString: '$$cvid' },
+                    ],
+                  },
+                ],
+              },
+              completed: true,
+              isDeleted: { $ne: true },
+            },
+          },
+          { $project: { _id: 0, completedAt: 1 } },
+        ],
+        as: 'progress',
+      },
+    };
+
+    const [countResult] = await this.enrollmentCollection
+      .aggregate([
+        { $match: matchStage },
+        progressLookup,
+        { $match: { 'progress.0': { $exists: true } } },
+        { $count: 'total' },
+      ])
+      .toArray();
+    const total: number = countResult?.total ?? 0;
+
+    const candidates = await this.enrollmentCollection
+      .aggregate([
+        { $match: matchStage },
+        progressLookup,
+        { $match: { 'progress.0': { $exists: true } } },
+        { $unwind: '$progress' },
+        { $sort: { 'progress.completedAt': 1, userId: 1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: 'users',
+            localField: 'userId',
+            foreignField: '_id',
+            as: 'user',
+          },
+        },
+        { $unwind: '$user' },
+        {
+          $project: {
+            _id: 0,
+            userId: { $toString: '$userId' },
+            courseVersionId: { $toString: '$courseVersionId' },
+            email: '$user.email',
+            name: {
+              $trim: {
+                input: {
+                  $concat: [
+                    { $ifNull: ['$user.firstName', ''] },
+                    ' ',
+                    { $ifNull: ['$user.lastName', ''] },
+                  ],
+                },
+              },
+            },
+            completedAt: '$progress.completedAt',
+          },
+        },
+      ])
+      .toArray();
+
+    return { total, candidates: candidates as any };
+  }
+
+  /**
+   * Returns the paginated progress roster for one course version: every active
+   * STUDENT enrollment with its completion percentage, whether or not the
+   * learner has finished. Unlike {@link getCourseCompletions} this does not
+   * filter on `completed: true`, so partially-through learners are included.
+   *
+   * `cohortId` is honoured when supplied — on a multi-cohort version, omitting
+   * it returns every cohort's rows and a learner enrolled in two cohorts
+   * appears once per cohort, so callers that care about a single cohort must
+   * pass it. Backs the server-to-server integration endpoint.
+   */
+  async getCourseProgressRoster(
+    courseId: string,
+    courseVersionId: string,
+    cohortId: string | undefined,
+    skip: number,
+    limit: number,
+  ): Promise<{
+    total: number;
+    learners: Array<{
+      userId: string;
+      email: string;
+      name: string;
+      courseVersionId: string;
+      cohortId: string | null;
+      percentCompleted: number;
+      completedItems: number;
+      totalItems: number;
+      completed: boolean;
+      completedAt?: Date;
+      enrolledAt?: Date;
+    }>;
+  }> {
+    await this.init();
+
+    const courseIdObj = ObjectId.isValid(courseId)
+      ? new ObjectId(courseId)
+      : null;
+    const versionIdObj = ObjectId.isValid(courseVersionId)
+      ? new ObjectId(courseVersionId)
+      : null;
+    const cohortIdObj =
+      cohortId && ObjectId.isValid(cohortId) ? new ObjectId(cohortId) : null;
+
+    // Malformed ids can never match; return the empty page rather than letting
+    // an unguarded `new ObjectId()` throw a BSONError 500.
+    if (!courseIdObj || !versionIdObj) {
+      return { total: 0, learners: [] };
+    }
+
+    const matchStage: Record<string, unknown> = {
+      role: { $regex: /^student$/i },
+      status: { $regex: /^active$/i },
+      isDeleted: { $ne: true },
+      courseId: { $in: [courseId, courseIdObj] },
+      courseVersionId: { $in: [courseVersionId, versionIdObj] },
+      ...(cohortIdObj ? { cohortId: cohortIdObj } : {}),
+    };
+
+    const [countResult] = await this.enrollmentCollection
+      .aggregate([{ $match: matchStage }, { $count: 'total' }])
+      .toArray();
+    const total: number = countResult?.total ?? 0;
+
+    const learners = await this.enrollmentCollection
+      .aggregate([
+        { $match: matchStage },
+        // Stable ordering for pagination: furthest along first, then a
+        // tiebreaker so a learner never repeats or vanishes across pages.
+        { $sort: { percentCompleted: -1, userId: 1 } },
+        { $skip: skip },
+        { $limit: limit },
+        {
+          $lookup: {
+            from: 'users',
+            let: { uid: { $toObjectId: '$userId' } },
+            pipeline: [
+              { $match: { $expr: { $eq: ['$_id', '$$uid'] } } },
+              { $project: { firstName: 1, lastName: 1, email: 1 } },
+            ],
+            as: 'user',
+          },
+        },
+        { $unwind: { path: '$user', preserveNullAndEmptyArrays: true } },
+        {
+          $lookup: {
+            from: 'newCourseVersion',
+            let: { vid: { $toObjectId: '$courseVersionId' } },
+            pipeline: [
+              { $match: { $expr: { $eq: ['$_id', '$$vid'] } } },
+              { $project: { totalItems: 1 } },
+            ],
+            as: 'version',
+          },
+        },
+        { $unwind: { path: '$version', preserveNullAndEmptyArrays: true } },
+        // `completed` / `completedAt` live on the progress doc, not the
+        // enrollment, and are cohort-scoped the same way.
+        {
+          $lookup: {
+            from: 'progress',
+            let: {
+              uid: '$userId',
+              cid: '$courseId',
+              cvid: '$courseVersionId',
+            },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: [{ $toString: '$userId' }, { $toString: '$$uid' }] },
+                      {
+                        $eq: [{ $toString: '$courseId' }, { $toString: '$$cid' }],
+                      },
+                      {
+                        $eq: [
+                          { $toString: '$courseVersionId' },
+                          { $toString: '$$cvid' },
+                        ],
+                      },
+                      ...(cohortIdObj
+                        ? [{ $eq: ['$cohortId', cohortIdObj] }]
+                        : []),
+                    ],
+                  },
+                  isDeleted: { $ne: true },
+                },
+              },
+              { $project: { _id: 0, completed: 1, completedAt: 1 } },
+            ],
+            as: 'progress',
+          },
+        },
+        { $unwind: { path: '$progress', preserveNullAndEmptyArrays: true } },
+        {
+          $project: {
+            _id: 0,
+            userId: { $toString: '$userId' },
+            email: '$user.email',
+            name: {
+              $trim: {
+                input: {
+                  $concat: [
+                    { $ifNull: ['$user.firstName', ''] },
+                    ' ',
+                    { $ifNull: ['$user.lastName', ''] },
+                  ],
+                },
+              },
+            },
+            courseVersionId: { $toString: '$courseVersionId' },
+            cohortId: {
+              $cond: [
+                { $ifNull: ['$cohortId', false] },
+                { $toString: '$cohortId' },
+                null,
+              ],
+            },
+            // An enrollment with no progress event yet has no percentCompleted
+            // field at all; coerce so callers always see a number.
+            percentCompleted: { $ifNull: ['$percentCompleted', 0] },
+            completedItems: { $ifNull: ['$completedItemsCount', 0] },
+            totalItems: { $ifNull: ['$version.totalItems', 0] },
+            completed: { $ifNull: ['$progress.completed', false] },
+            completedAt: '$progress.completedAt',
+            enrolledAt: '$enrollmentDate',
           },
         },
       ])

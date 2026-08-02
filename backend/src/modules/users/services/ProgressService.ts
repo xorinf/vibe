@@ -9,6 +9,7 @@ import {
   ICourseVersion,
   IWatchTime,
   IProgress,
+  ItemType,
   IVideoDetails,
   ICurrentProgressPath,
   IEnrollment,
@@ -823,11 +824,21 @@ class ProgressService extends BaseService {
     if (itemsGroup && itemsGroup.items) {
       itemsGroup.items = itemsGroup.items.filter((i: any) => !i.isHidden && !i.isDeleted);
     }
-    const sortedItems = itemsGroup.items.sort((a, b) =>
+    /**
+     * A section can legitimately end up with nothing visible — every item hidden
+     * or soft-deleted — and the filter above then leaves an empty array. Indexing
+     * it threw "Cannot read properties of undefined (reading '_id')", which
+     * surfaced as a 500 on stopItem and left the learner unable to complete the
+     * item at all. Treated as "last in this section" so sequencing moves on to the
+     * next section, matching how getFirstItemInSequence already guards this.
+     */
+    const sortedItems = (itemsGroup?.items ?? []).sort((a, b) =>
       a.order.localeCompare(b.order),
     );
-    const lastItem = sortedItems[sortedItems.length - 1]._id;
-    if (lastItem?.toString() === itemId) {
+    const lastItem = sortedItems.length
+      ? sortedItems[sortedItems.length - 1]._id
+      : undefined;
+    if (!sortedItems.length || lastItem?.toString() === itemId) {
       isLastItem = true;
     }
 
@@ -945,11 +956,13 @@ class ProgressService extends BaseService {
     if (itemsGroup && itemsGroup.items) {
       itemsGroup.items = itemsGroup.items.filter((i: any) => !i.isHidden && !i.isDeleted);
     }
-    const sortedItems = itemsGroup.items.sort((a, b) =>
+    // Same empty-section guard as getNextItemInSequence: nothing visible means
+    // treat the item as first here, so we look to the previous section.
+    const sortedItems = (itemsGroup?.items ?? []).sort((a, b) =>
       a.order.localeCompare(b.order),
     );
-    const firstItem = sortedItems[0]._id;
-    if (firstItem?.toString() === itemId) {
+    const firstItem = sortedItems.length ? sortedItems[0]._id : undefined;
+    if (!sortedItems.length || firstItem?.toString() === itemId) {
       isFirstItem = true;
     }
 
@@ -4346,6 +4359,36 @@ class ProgressService extends BaseService {
 
     return allItemIds;
   }
+
+  /**
+   * Item types whose "completion" cannot be inferred from watch-time alone —
+   * they require a real learner-submitted artifact as the source of truth.
+   * PROJECT items are only complete when a project_submissions doc exists;
+   * a synthetic watchTime record must never stand in for that.
+   */
+  private static readonly SUBMISSION_GATED_TYPES: Set<string> = new Set([ItemType.PROJECT]);
+
+  async getSubmissionGatedItemIds(courseVersionId: string): Promise<Set<string>> {
+    const courseVersion = await this.courseRepo.readVersion(courseVersionId);
+    if (!courseVersion) return new Set();
+
+    const gated = new Set<string>();
+    for (const module of courseVersion.modules) {
+      for (const section of module.sections) {
+        const itemGroupId = section.itemsGroupId;
+        if (!itemGroupId) continue;
+        const itemGroup = await this.itemRepo.readItemsGroup(itemGroupId.toString());
+        if (!itemGroup || !itemGroup.items) continue;
+        for (const item of itemGroup.items) {
+          if (item._id && ProgressService.SUBMISSION_GATED_TYPES.has(item.type)) {
+            gated.add(item._id.toString());
+          }
+        }
+      }
+    }
+    return gated;
+  }
+
   async getModuleWiseProgress(
     userId: string,
     courseId: string,
@@ -4634,6 +4677,11 @@ class ProgressService extends BaseService {
       throw new NotFoundError('No items found for this course version');
     }
 
+    // Computed once per course version, not once per user — this only
+    // depends on versionId, so hoisting it out of the user loop avoids
+    // re-walking the course structure for every enrolled student.
+    const gatedItemIds = await this.getSubmissionGatedItemIds(versionId);
+
     for (const userId of enrolledUsersId) {
       let isProceed = true;
       if (lastItem.type == 'QUIZ') {
@@ -4673,19 +4721,24 @@ class ProgressService extends BaseService {
       const missedItemIds = allItemIds.filter(
         itemId => !completedItemIds.includes(itemId),
       );
+
+      const eligibleMissedItemIds = missedItemIds.filter(
+        itemId => !gatedItemIds.has(itemId),
+      );
+
       console.log(`UserId: ${userId}`);
-      console.log(`Missed Items:`, missedItemIds);
-      console.log(`Missed Items Count: ${missedItemIds.length}`);
+      console.log(`Missed Items:`, eligibleMissedItemIds);
+      console.log(`Missed Items Count: ${eligibleMissedItemIds.length}`);
       console.log(`Completed Items length:`, completedItemIds.length);
       console.log(`Total Items length:`, allItemIds.length);
 
-      if (!missedItemIds.length) continue;
+      if (!eligibleMissedItemIds.length) continue;
 
       await this.progressRepository.addBulkWatchTime(
         userId,
         courseId,
         versionId,
-        missedItemIds,
+        eligibleMissedItemIds,
       );
     }
   }
