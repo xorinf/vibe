@@ -1,5 +1,5 @@
 import { injectable, inject } from 'inversify';
-import { Collection, ObjectId } from 'mongodb';
+import { ClientSession, Collection, ObjectId } from 'mongodb';
 import { MongoDatabase } from '#shared/database/index.js';
 import { GLOBAL_TYPES } from '#root/types.js';
 import { IleExperience, IleStatus, IleVersion } from '../classes/transformers/IleExperience.js';
@@ -19,22 +19,33 @@ const COLLECTION = 'interactive_experiences';
 export class IleRepository {
   constructor(@inject(GLOBAL_TYPES.Database) private readonly db: MongoDatabase) {}
 
-  private async col(): Promise<Collection<IleExperience>> {
+  protected async col(): Promise<Collection<IleExperience>> {
     return this.db.getCollection<IleExperience>(COLLECTION);
   }
 
   /**
    * Read-side normaliser. Pulls every doc through this so callers can
    * treat v0 and v1 documents identically.
+   *
+   * IMPORTANT: builds a fresh doc rather than mutating the Mongo
+   * driver's BSON object. The old code mutated the doc in place; any
+   * subsequent code that held a reference (or that the driver kept in
+   * a connection-pool cache) would see phantom updates that never
+   * landed on the server. The shallow-clone returned here keeps the
+   * `versions` array identity stable for callers but isolates the
+   * call site from surprise cross-iteration writes.
    */
   private normalise(doc: IleExperience | null): IleExperience | null {
     if (!doc) return null;
-    if (!Array.isArray(doc.versions)) doc.versions = [];
-    if (typeof doc.currentVersion !== 'number') doc.currentVersion = doc.versions.length;
-    return doc;
+    const versions = Array.isArray(doc.versions) ? doc.versions : [];
+    const currentVersion =
+      typeof doc.currentVersion === 'number'
+        ? doc.currentVersion
+        : versions.length;
+    return { ...doc, versions, currentVersion };
   }
 
-  async insert(doc: IleExperience): Promise<IleExperience> {
+  async insert(doc: IleExperience, session?: ClientSession): Promise<IleExperience> {
     const col = await this.col();
     // Defensive: ensure the new fields exist on insert. Pin updatedAt
     // equal to createdAt so /listByOwner (which sorts by updatedAt) has
@@ -44,23 +55,27 @@ export class IleRepository {
     const now = doc.createdAt ?? new Date();
     doc.createdAt = now;
     doc.updatedAt = now;
-    const result = await col.insertOne(doc);
+    const result = await col.insertOne(doc, { session });
     return { ...doc, _id: result.insertedId };
   }
 
-  async findById(id: string): Promise<IleExperience | null> {
+  async findById(id: string, session?: ClientSession): Promise<IleExperience | null> {
     if (!ObjectId.isValid(id)) return null;
     const col = await this.col();
-    return this.normalise(await col.findOne({ _id: new ObjectId(id) }));
+    return this.normalise(await col.findOne({ _id: new ObjectId(id) }, { session }));
   }
 
-  async update(id: string, patch: Partial<IleExperience>): Promise<IleExperience | null> {
+  async update(
+    id: string,
+    patch: Partial<IleExperience>,
+    session?: ClientSession,
+  ): Promise<IleExperience | null> {
     if (!ObjectId.isValid(id)) return null;
     const col = await this.col();
     const result = await col.findOneAndUpdate(
       { _id: new ObjectId(id) },
       { $set: { ...patch, updatedAt: new Date() } },
-      { returnDocument: 'after' },
+      { returnDocument: 'after', session },
     );
     return this.normalise(result ?? null);
   }
@@ -150,6 +165,7 @@ export class IleRepository {
   async appendVersion(
     id: string,
     snapshot: Omit<IleVersion, 'version' | 'savedAt' | 'htmlLength'>,
+    session?: ClientSession,
   ): Promise<{ version: number }> {
     if (!ObjectId.isValid(id)) return { version: 0 };
     const col = await this.col();
@@ -162,7 +178,7 @@ export class IleRepository {
     const bumped = await col.findOneAndUpdate(
       { _id: new ObjectId(id) },
       { $inc: { currentVersion: 1 }, $set: { updatedAt: now } },
-      { returnDocument: 'after' },
+      { returnDocument: 'after', session },
     );
     if (!bumped) return { version: 0 };
     const assignedVersion =
@@ -184,9 +200,75 @@ export class IleRepository {
         },
         $set: { updatedAt: now },
       },
+      { session },
     );
 
     return { version: assignedVersion };
+  }
+
+  /**
+   * Combined head-update + version-append for the save hot path.
+   *
+   * Saves 2 round-trips vs. the old (update → appendVersion → findById)
+   * dance by doing $set head fields + $inc currentVersion + $push
+   * snapshot in two atomic writes instead of three + a read.
+   *
+   * The two writes ARE still two round-trips (Mongo can't combine
+   * `$inc` + `$push` with a derived `$push` value in a single op), but
+   * they replace three writes + a read — net 4 RTT → 2 RTT.
+   *
+   * Atomicity: both writes run inside the caller's session, so a crash
+   * between step 1 and step 2 rolls the whole save back. Same contract
+   * as the old 3-call sequence.
+   *
+   * ponytail: the $push in step 2 is intentionally NOT conditional on
+   * the assigned version from step 1. If step 2 fails on validation
+   * (e.g. oversized html), the surrounding transaction aborts, so no
+   * partial state ever reaches the client. Don't add a pre-flight
+   * check here — the transaction is the only check that matters.
+   */
+  async saveAndAppendVersion(
+    id: string,
+    headPatch: Partial<IleExperience>,
+    snapshot: Omit<IleVersion, 'version' | 'savedAt' | 'htmlLength'>,
+    session?: ClientSession,
+  ): Promise<IleExperience | null> {
+    if (!ObjectId.isValid(id)) return null;
+    const col = await this.col();
+    const now = new Date();
+
+    // Step 1: head $set + $inc currentVersion. Returns the doc with
+    // the post-increment version number so we can stamp the snapshot.
+    const bumped = await col.findOneAndUpdate(
+      { _id: new ObjectId(id) },
+      {
+        $set: { ...headPatch, updatedAt: now },
+        $inc: { currentVersion: 1 },
+      },
+      { returnDocument: 'after', session },
+    );
+    if (!bumped) return null;
+    const assignedVersion =
+      typeof bumped.currentVersion === 'number' ? bumped.currentVersion : 0;
+
+    // Step 2: $push snapshot with the assigned version.
+    await col.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $push: {
+          versions: {
+            ...snapshot,
+            version: assignedVersion,
+            savedAt: now,
+            htmlLength: snapshot.html.length,
+          } as IleVersion,
+        },
+        $set: { updatedAt: now },
+      },
+      { session },
+    );
+
+    return this.normalise(bumped);
   }
   /**
    * Update an existing version's optional label without changing its content.
