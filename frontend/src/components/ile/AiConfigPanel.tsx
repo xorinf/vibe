@@ -5,6 +5,7 @@ import {
   EyeOff,
   Loader2,
   Settings2,
+  Unplug,
   Wifi,
   XCircle,
   AlertTriangle,
@@ -15,6 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/utils/utils';
 import {
+  deleteIleAiConfig,
   getIleAiConfig,
   saveIleAiConfig,
   testIleAiConfig,
@@ -162,6 +164,8 @@ export interface UseAiConfigStateResult {
   setShowKey: (v: boolean) => void;
   handleTest: () => void;
   handleSave: () => void;
+  handleDisconnect: () => void;
+  disconnecting: boolean;
 }
 
 function useAiConfigState(
@@ -171,6 +175,7 @@ function useAiConfigState(
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
 
   // Form state
   const [provider, setProvider] = useState<IleProviderId>('anthropic');
@@ -335,6 +340,52 @@ function useAiConfigState(
     })();
   }
 
+  /**
+   * Disconnect the saved AI provider. Drops the Keystore-encrypted
+   * envelope from Mongo via DELETE /interactive-experiences/config.
+   * After this succeeds the teacher will see the actionable
+   * "Configure AI first" toast on the next generation attempt.
+   *
+   * The local form state is reset so the chip + form both reflect the
+   * disconnected state. The apiKey field is cleared (it was never
+   * persisted client-side anyway, but be explicit) and the model/baseUrl
+   * are reset to the Anthropic default so the next save is one click
+   * away from working.
+   */
+  function handleDisconnect() {
+    if (disconnecting) return;
+    const confirmed = window.confirm(
+      'Disconnect the saved AI provider? You can re-enter credentials any time.',
+    );
+    if (!confirmed) return;
+    setDisconnecting(true);
+    (async () => {
+      try {
+        await deleteIleAiConfig();
+        if (cancelledRef.current) return;
+        setSaved(null);
+        setApiKey('');
+        setProvider('anthropic');
+        setModel(PROVIDER_DEFAULTS.anthropic.defaultModel);
+        setBaseUrl(PROVIDER_DEFAULTS.anthropic.defaultBaseUrl);
+        setStatus({
+          kind: 'not_configured',
+          message: 'Disconnected. Add a new provider to start generating.',
+        });
+        setHasTested(true);
+        onConfiguredChange?.(false);
+        toast.success('AI configuration disconnected.');
+      } catch (err: unknown) {
+        if (cancelledRef.current) return;
+        const message =
+          err instanceof Error ? err.message : 'Disconnect failed.';
+        toast.error(message);
+      } finally {
+        if (!cancelledRef.current) setDisconnecting(false);
+      }
+    })();
+  }
+
   return {
     loading,
     saving,
@@ -355,6 +406,8 @@ function useAiConfigState(
     setShowKey: (v: boolean) => setShowKey(v),
     handleTest,
     handleSave,
+    handleDisconnect,
+    disconnecting,
   };
 }
 
@@ -645,37 +698,62 @@ export function AiConfigFormBody({
       )}
 
       {/* Action row */}
-      <div className="flex items-center justify-end gap-2 pt-1">
-        <Button
-          variant="outline"
-          size="lg"
-          onClick={s.handleTest}
-          disabled={s.testing || s.saving || !s.model.trim()}
-        >
-          {s.testing ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Testing…
-            </>
-          ) : (
-            <>
-              <Wifi className="h-3.5 w-3.5" /> Test Connection
-            </>
-          )}
-        </Button>
-        <Button
-          size="lg"
-          onClick={s.handleSave}
-          disabled={s.saving || s.testing}
-          className="bg-primary hover:bg-primary/90"
-        >
-          {s.saving ? (
-            <>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
-            </>
-          ) : (
-            'Save Configuration'
-          )}
-        </Button>
+      <div className="flex items-center justify-between gap-2 pt-1">
+        {s.saved ? (
+          <Button
+            variant="ghost"
+            size="lg"
+            onClick={s.handleDisconnect}
+            disabled={s.disconnecting || s.saving || s.testing}
+            className="text-muted-foreground hover:text-destructive "
+            aria-label="Disconnect saved AI provider"
+            title="Remove the saved AI provider configuration"
+          >
+            {s.disconnecting ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Disconnecting…
+              </>
+            ) : (
+              <>
+                <Unplug className="h-3.5 w-3.5" /> Disconnect
+              </>
+            )}
+          </Button>
+        ) : (
+          <span /> /* keep the right-aligned buttons pushed right */
+        )}
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={s.handleTest}
+            disabled={s.testing || s.saving || !s.model.trim()}
+          >
+            {s.testing ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Testing…
+              </>
+            ) : (
+              <>
+                <Wifi className="h-3.5 w-3.5" /> Test Connection
+              </>
+            )}
+          </Button>
+          <Button
+            size="lg"
+            onClick={s.handleSave}
+            disabled={s.saving || s.testing}
+            className="bg-primary hover:bg-primary/90"
+          >
+            {s.saving ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Saving…
+              </>
+            ) : (
+              'Save Configuration'
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   );

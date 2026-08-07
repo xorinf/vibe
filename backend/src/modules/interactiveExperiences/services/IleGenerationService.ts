@@ -11,6 +11,7 @@ import {
   IleAiConfig,
   ProviderError,
   ProviderCancelledError,
+  ProviderUnknownError,
   asProviderError,
 } from './providers/types.js';
 import { createProvider } from './providers/index.js';
@@ -23,7 +24,25 @@ import {
   GenerationContext,
 } from '../context/types.js';
 
-const SYSTEM_PROMPT = `You are ViBe's Interactive Learning Experience designer.
+const SYSTEM_PROMPT = `# HARD RULE — your entire response is rendered into a sandboxed iframe.
+
+Your reply MUST be EXACTLY ONE complete \`<!DOCTYPE html>...</html>\` document,
+starting with the literal text \`<!DOCTYPE\` and ending with \`</html>\`.
+No prose, no explanation, no preamble, no markdown fences, no narration,
+no \`think...think\` blocks, no \`\`\` fences. Anything before \`<!DOCTYPE\`
+or after \`</html>\` is silently discarded. If you violate this rule the
+teacher sees garbage in their iframe.
+
+## Conversational prompts
+When the teacher asks a conversational question (e.g. "I want to understand
+how X works", "explain Y to me", "show me how Z works"), the answer MUST
+still be a working HTML experience. Embed any explanatory text inside
+\`<!-- … -->\` HTML comments at the top of the document, or as static
+\`section\`/\`p\` content rendered visibly in the page. Do NOT refuse with
+prose. The iframe is the only surface the teacher sees — an answer that
+isn't HTML is invisible.
+
+You are ViBe's Interactive Learning Experience designer.
 Your job is to design a single self-contained interactive HTML experience
 for the lesson described by the teacher.
 
@@ -307,6 +326,34 @@ export class IleGenerationService {
 
       const finalHtml = this.normalizeHtml(html);
 
+      // Guard: catch the model-ignored-prompt case where the
+      // provider emits prose narration instead of a `<!DOCTYPE
+      // html>` document. The MiniMax provider in particular will
+      // reply conversationally when the prompt is short. Without
+      // this guard the narration text would be persisted as the
+      // ILE and the iframe would render plain text. Emit a clear
+      // error and bail out so the teacher gets actionable feedback
+      // instead of garbage in their workspace.
+      if (finalHtml.length > 100 && !this.looksLikeHtmlDoc(finalHtml)) {
+        ileLog('warn', 'stream.model_output_not_html', {
+          requestId,
+          ownerId,
+          provider: config.provider,
+          model: config.model,
+          htmlLength: finalHtml.length,
+          first120: finalHtml.slice(0, 120),
+        });
+        sse.emit('error', {
+          message:
+            'The model returned prose instead of an HTML document. ' +
+            'Try a more specific prompt (e.g. "interactive button that ' +
+            'toggles a CSS class on click") or pick a different model.',
+          kind: 'provider_output_not_html',
+        });
+        sse.close();
+        return;
+      }
+
       await this.repo.appendAssistantTurn(String(saved._id), {
         role: 'assistant',
         content: 'Generated experience',
@@ -567,6 +614,34 @@ export class IleGenerationService {
       fireNextStep();
       const finalHtml = this.normalizeHtml(html);
 
+      // Guard: catch the model-ignored-prompt case where the
+      // provider emits prose narration instead of a `<!DOCTYPE
+      // html>` document. The MiniMax provider in particular will
+      // reply conversationally when the prompt is short. Without
+      // this guard the narration text would be persisted as the
+      // ILE and the iframe would render plain text. Emit a clear
+      // error and bail out so the teacher gets actionable feedback
+      // instead of garbage in their workspace.
+      if (finalHtml.length > 100 && !this.looksLikeHtmlDoc(finalHtml)) {
+        ileLog('warn', 'stream.model_output_not_html', {
+          requestId,
+          ownerId,
+          provider: config.provider,
+          model: config.model,
+          htmlLength: finalHtml.length,
+          first120: finalHtml.slice(0, 120),
+        });
+        sse.emit('error', {
+          message:
+            'The model returned prose instead of an HTML document. ' +
+            'Try a more specific prompt (e.g. "interactive button that ' +
+            'toggles a CSS class on click") or pick a different model.',
+          kind: 'provider_output_not_html',
+        });
+        sse.close();
+        return;
+      }
+
       await this.repo.appendHistory(String(saved._id), {
         role: 'assistant',
         content: 'Generated experience from context',
@@ -773,6 +848,34 @@ export class IleGenerationService {
       }
 
       const finalHtml = this.normalizeHtml(html);
+
+      // Guard: catch the model-ignored-prompt case where the
+      // provider emits prose narration instead of a `<!DOCTYPE
+      // html>` document. The MiniMax provider in particular will
+      // reply conversationally when the prompt is short. Without
+      // this guard the narration text would be persisted as the
+      // ILE and the iframe would render plain text. Emit a clear
+      // error and bail out so the teacher gets actionable feedback
+      // instead of garbage in their workspace.
+      if (finalHtml.length > 100 && !this.looksLikeHtmlDoc(finalHtml)) {
+        ileLog('warn', 'stream.model_output_not_html', {
+          requestId,
+          ownerId,
+          provider: config.provider,
+          model: config.model,
+          htmlLength: finalHtml.length,
+          first120: finalHtml.slice(0, 120),
+        });
+        sse.emit('error', {
+          message:
+            'The model returned prose instead of an HTML document. ' +
+            'Try a more specific prompt (e.g. "interactive button that ' +
+            'toggles a CSS class on click") or pick a different model.',
+          kind: 'provider_output_not_html',
+        });
+        sse.close();
+        return;
+      }
       await this.repo.appendAssistantTurn(args.experienceId, {
         role: 'assistant',
         content: 'Applied edit',
@@ -890,9 +993,48 @@ export class IleGenerationService {
   }
 
   /**
+   * Sanity check: does the streamed output actually look like HTML?
+   * The MiniMax (and other OpenAI-compatible) providers sometimes
+   * ignore the "emit `<!DOCTYPE html>...</html>`" instruction in
+   * the system prompt and emit conversational prose instead —
+   * especially when the user's prompt is short or ambiguous. We
+   * catch this at `done` time so the teacher doesn't get narration
+   * text saved as their ILE.
+   *
+   * Heuristic: a real HTML doc has at least one of `<!doctype`,
+   * `<html`, `<body`, or `</html>`. If none of these are present
+   * AND the content has more than 100 characters of plain text,
+   * it's almost certainly prose, not HTML.
+   *
+   * The threshold is intentionally low — anything below 100 chars
+   * is probably an incomplete stream (the model got cut off
+   * mid-`<html>`). Above 100 chars with no HTML markers at all is
+   * a model-output failure.
+   */
+  private looksLikeHtmlDoc(html: string): boolean {
+    if (!html) return false;
+    if (/<!doctype/i.test(html)) return true;
+    if (/<html[\s>]/i.test(html)) return true;
+    if (/<body[\s>]/i.test(html)) return true;
+    if (/<\/html>/i.test(html)) return true;
+    return false;
+  }
+
+
+
+  /**
    * Resolve the saved ILE config for the owner and construct a provider
-   * client. Throws a clean error if the owner hasn't configured ILE yet —
-   * the SSE layer surfaces this back to the chat pane.
+   * client. Throws a typed ProviderUnknownError when the owner hasn't
+   * configured ILE — the SSE layer emits an `error` event whose message
+   * tells the teacher exactly what to do (open the AI Configuration panel).
+   *
+   * We use ProviderUnknownError (not a new `not_configured` kind) because:
+   *   - the upstream taxonomy is provider-only, not config-state
+   *   - the actionable signal is the MESSAGE, not a new taxonomy bucket
+   *   - the kind field still distinguishes upstream failures from "you
+   *     forgot to set up ILE"
+   * The teacher's `AI Configuration panel` UI surfaces a button regardless
+   * of kind; the toast copy comes from the message.
    */
   private async makeClientForOwner(ownerId: string): Promise<{
     client: ChatStream;
@@ -900,12 +1042,12 @@ export class IleGenerationService {
   }> {
     const config = await this.aiConfig.loadConfigForOwner(ownerId);
     if (!config || !config.apiKey) {
-      throw new Error(
+      throw new ProviderUnknownError(
         'No ILE AI configuration found. Open the AI Configuration panel and save your provider + API key.',
       );
     }
     if (!config.model) {
-      throw new Error(
+      throw new ProviderUnknownError(
         'ILE AI configuration is missing a model. Open the AI Configuration panel and set one.',
       );
     }
@@ -952,6 +1094,39 @@ export class IleGenerationService {
   private sanitizeDeltaForHtml(cumulative: string, delta: string): string {
     if (!delta) return delta;
     let trimmed = delta;
+    // Strip `think` reasoning blocks. Providers like MiniMax
+    // emit reasoning inline in delta.content rather than via a
+    // separate SSE event; the `<` `>` chars inside crash the
+    // CodeMirror @lezer/html parser. Strip them before the
+    // editor ever sees them. Looped so consecutive blocks all
+    // come out, with a length cap as a safety net against a
+    // runaway model.
+    // Strip `think` reasoning blocks. The MiniMax (and similar)
+    // providers emit the model's chain-of-thought inline in
+    // `delta.content` rather than via a separate SSE event. Two
+    // variants we have to handle:
+    //   (a) Full `<think>...</think>` block (Anthropic-style)
+    //   (b) Unclosed `<think>...EOF` (model cut off mid-think)
+    //   (c) Loose `...think>` closing tag with no opener — the
+    //       MiniMax provider emits narration prose that ends in
+    //       a stray `think>` closing marker, NOT wrapped in
+    //       `<think>...</think>`. We handle (c) by anchoring on
+    //       `<!doctype` and discarding everything before it.
+    // Looped until no more matches; length cap as a safety net.
+    let previous: string;
+    do {
+      previous = trimmed;
+      trimmed = trimmed.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '');
+    } while (trimmed !== previous && trimmed.length < 200000);
+    // Anchor strip: if `trimmed` has a `<!doctype` somewhere,
+    // anything before it is the model's chain-of-thought and
+    // should be discarded (handles the (c) case above). The
+    // rstrip removes trailing whitespace so the doc starts
+    // cleanly on the HTML opener.
+    const dt = /<!doctype/i.exec(trimmed);
+    if (dt && dt.index > 0) {
+      trimmed = trimmed.slice(dt.index);
+    }
     // Strip leading fence on the first delta (cumulative is still empty
     // or contains only whitespace when this kicks in).
     const leadingFence = cumulative.match(/^(\s*```(?:html)?\s*\n?)/i);

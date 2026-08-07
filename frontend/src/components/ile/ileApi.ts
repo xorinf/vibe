@@ -22,9 +22,10 @@
  *
  *   1. SSE transport            (lines ~1–290)
  *        openIleSse, bindIleStream, ILEStreamSource, getAuthToken
- *   2. REST helpers              (lines ~298–560)
- *        authHeaders, postJson/putJson/getJson/patchJson/delete,
- *        fetchWithTimeout, anySignal
+ *   2. REST helpers              (lines ~510–590)
+ *        postJson/putJson/getJson/patchJson/delete, defaultClient
+ *        (a module-level IleApiClient instance — all public
+ *        functions go through it)
  *   3. Experience CRUD           (lines ~494–722)
  *        saveIleExperience, getIleExperience, publishIleExperience,
  *        listIleExperiences, versionedSave, restoreVersion, rename,
@@ -106,14 +107,44 @@ interface ILEStreamSource {
  * event block is a run of `field: value` lines followed by a
  * blank line; we only consume the `event:` and `data:` fields,
  * which is the entire ILE server contract.
+ *
+ * Pass an external `signal` (e.g. the queue's AbortSignal) when
+ * callers beyond this module need to cancel in-flight — without
+ * it, the queue's `controller.abort()` would only reject its
+ * own promise but leave the underlying fetch running until the
+ * server closed the connection. The external signal is OR'd
+ * with our internal one.
  */
 function openIleSse(
   url: string,
   body: unknown,
   token: string,
+  externalSignal?: AbortSignal,
 ): ILEStreamSource {
   const controller = new AbortController();
   let closed = false;
+  // Compose the caller's external signal with our internal one so
+  // either path can abort the fetch. We avoid AbortSignal.any() because
+  // it throws on browsers that pre-date the static method (a few
+  // mobile-WebView builds under iOS 14). The bridge also closes the
+  // listener loop when the external signal fires so we don't keep
+  // pulling bytes off a dead socket.
+  const onExternalAbort = () => {
+    if (closed) return;
+    closed = true;
+    try {
+      controller.abort();
+    } catch {
+      // already aborted
+    }
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      onExternalAbort();
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
   const listeners: Record<
     string,
     Array<(ev: MessageEvent) => void>
@@ -356,6 +387,8 @@ function bindIleStream(
  * state. The API just hands the caller the raw events.
  */
 
+import { IleApiClient } from './IleApiClient';
+
 const API_BASE = import.meta.env.VITE_BASE_URL ?? '';
 
 /**
@@ -374,10 +407,8 @@ export function getAuthToken(): string | null {
   }
 }
 
-function authHeaders(): Record<string, string> {
-  const token = getAuthToken();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
+// authHeaders moved to ./IleApiClient.ts (the client reads
+// the token fresh on every request).
 
 /**
  * Provenance for context-driven generations (e.g. YouTube). The
@@ -486,41 +517,138 @@ export interface SaveIleRequest {
   html: string;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(),
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`API ${path} failed: ${res.status} ${res.statusText} ${text}`);
+/**
+ * Body for the single-source-of-truth save endpoint
+ * (POST /interactive-experiences/save-with-item). Persists the ILE
+ * doc AND patches the matching itemsGroup row in the same Mongo
+ * transaction on the backend. Replaces the old two-step pattern
+ * (save the ILE doc, then PATCH the itemsGroup from the frontend)
+ * that was the root cause of orphan-row bugs.
+ */
+export interface SaveIleWithItemRequest extends SaveIleRequest {
+  /**
+   * itemsGroup row _id to bind this save to. Optional — when omitted
+   * (e.g. saving an experience from the ILE library without a
+   * course context), the backend only persists the ILE doc and
+   * skips the itemsGroup $set.
+   */
+  itemId?: string;
+  label?: string;
+}
+
+/**
+ * Response from the unified save endpoint. Includes the ILE doc
+ * (with its fresh _id + currentVersion) and — when the save was
+ * bound to an itemsGroup row — the post-save item state. The
+ * frontend uses the item state to update the section's item list
+ * (status pill, experienceId pointer) without a follow-up GET.
+ */
+export interface SaveIleWithItemResponse {
+  ile: IleExperienceResponse;
+  item?: {
+    _id: string;
+    type: string;
+    name: string;
+    description: string;
+    details?: any;
+  };
+}
+
+/**
+ * Module-level default client. Every public function in this
+ * file uses this client — it shares the auth-header read, the
+ * timeout policy, the retry policy, and the typed error
+ * hierarchy. Pages that need to cancel in-flight requests
+ * (e.g. on unmount) should construct their own
+ * `new IleApiClient()` and call `client.cancel()` in their
+ * useEffect cleanup.
+ */
+const defaultClient = new IleApiClient();
+
+/** Re-export so callers can construct their own client
+ *  (e.g. with a per-page cancel) without reaching into the
+ *  internal module symbol. */
+export { IleApiClient } from './IleApiClient';
+export { IleApiError } from './IleApiClient';
+export type { IleRequestOptions } from './IleApiClient';
+
+/**
+ * Per-call options. Pass an `AbortSignal` to cancel the request
+ * when the component unmounts; pass a longer `timeoutMs` for
+ * long-running endpoints (e.g. asset upload); pass
+ * `idempotent: true` to opt into automatic retries.
+ *
+ * The union of optional fields matches the `IleRequestOptions`
+ * interface in `IleApiClient.ts`; we re-export the type here
+ * for call-site convenience.
+ */
+export interface IleCallOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  retries?: number;
+  retryDelayMs?: number;
+  idempotent?: boolean;
+}
+
+/**
+ * Internal adapter: convert a public `IleCallOptions` into the
+ * client's `IleRequestOptions`. Exported so the SSE transport
+ * (which has its own non-HTTP code path) can share the same
+ * cancellation primitives.
+ */
+function toClientOptions(
+  opts: IleCallOptions | undefined,
+  defaultIdempotent: boolean,
+): {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  retries?: number;
+  retryDelayMs?: number;
+  idempotent?: boolean;
+} {
+  if (!opts) {
+    return defaultIdempotent ? { idempotent: true } : {};
   }
-  return res.json();
+  return {
+    ...(opts.signal !== undefined ? { signal: opts.signal } : {}),
+    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+    ...(opts.retries !== undefined ? { retries: opts.retries } : {}),
+    ...(opts.retryDelayMs !== undefined
+      ? { retryDelayMs: opts.retryDelayMs }
+      : {}),
+    ...(opts.idempotent !== undefined
+      ? { idempotent: opts.idempotent }
+      : defaultIdempotent
+        ? { idempotent: true }
+        : {}),
+  };
+}
+
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  opts?: IleCallOptions,
+): Promise<T> {
+  return defaultClient.post<T>(
+    path,
+    body,
+    toClientOptions(opts, /* defaultIdempotent */ false),
+  );
 }
 
 /**
  * PUT helper for the AI config endpoint. Body shape matches IleAiConfigInput.
  */
-async function putJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(),
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`API ${path} failed: ${res.status} ${res.statusText} ${text}`);
-  }
-  return res.json();
+async function putJson<T>(
+  path: string,
+  body: unknown,
+  opts?: IleCallOptions,
+): Promise<T> {
+  return defaultClient.put<T>(
+    path,
+    body,
+    toClientOptions(opts, /* defaultIdempotent */ false),
+  );
 }
 
 /**
@@ -528,33 +656,26 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
  * endpoint where the body is optional (the server falls back to the stored
  * config when fields are absent).
  */
-async function postJsonAllowEmpty<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(),
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`API ${path} failed: ${res.status} ${res.statusText} ${text}`);
-  }
-  return res.json();
+async function postJsonAllowEmpty<T>(
+  path: string,
+  body: unknown,
+  opts?: IleCallOptions,
+): Promise<T> {
+  return defaultClient.post<T>(
+    path,
+    body,
+    toClientOptions(opts, /* defaultIdempotent */ false),
+  );
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
-    credentials: 'include',
-    headers: { ...authHeaders() },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`API ${path} failed: ${res.status} ${res.statusText} ${text}`);
-  }
-  return res.json();
+async function getJson<T>(
+  path: string,
+  opts?: IleCallOptions,
+): Promise<T> {
+  return defaultClient.get<T>(
+    path,
+    toClientOptions(opts, /* defaultIdempotent */ true),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -564,6 +685,74 @@ export async function saveIleExperience(
   body: SaveIleRequest,
 ): Promise<IleExperienceResponse> {
   return postJson<IleExperienceResponse>('/interactive-experiences', body);
+}
+
+/**
+ * Single-source-of-truth save. The backend writes the ILE doc
+ * AND patches the itemsGroup row in the same Mongo transaction
+ * (see backend POST /interactive-experiences/save-with-item).
+ *
+ * Use this from any save path that has a course context: the
+ * workspace's Save button, the "Add Item → Interactive Experience"
+ * first-save flow, the ILE library's "Save & attach" flow. This
+ * replaces the old sequence of (saveIleExperience + a separate
+ * PATCH to /courses/.../items/...) which left orphan rows when
+ * the browser crashed mid-flow.
+ */
+export async function saveIleExperienceWithItem(
+  body: SaveIleWithItemRequest,
+  opts?: IleCallOptions,
+): Promise<SaveIleWithItemResponse> {
+  return postJson<SaveIleWithItemResponse>(
+    '/interactive-experiences/save-with-item',
+    body,
+    opts,
+  );
+}
+
+/**
+ * Body for the "Link existing experience" picker in the inline
+ * view. Same shape as `SaveIleWithItemRequest` minus the
+ * `html` / `prompt` / `title` fields — the link operation
+ * doesn't re-save the ILE doc, it just rewires the
+ * `itemId` pointer + the itemsGroup row.
+ */
+export interface LinkIleToItemRequest {
+  courseId: string;
+  courseVersionId: string;
+  itemId: string;
+  label?: string;
+}
+
+/**
+ * Wire an existing ILE doc to a course item. Used by the
+ * "Link existing experience" picker in the inline view —
+ * the picker hands us the ILE's `_id` and the itemsGroup
+ * row's `_id`, and the backend does the rest in one
+ * transaction (see backend POST /interactive-experiences/:id/link-item).
+ *
+ * Distinct from `saveIleExperienceWithItem`:
+ *   - The ILE doc is NOT re-saved. We only update the
+ *     `itemId` head field; no new version snapshot.
+ *   - Auth check is "is the user the ILE's owner", not
+ *     "does the user have course-level write permission" —
+ *     so a teacher can attach their ILE to any course item.
+ *   - Returns 403 (not 500) when the caller doesn't own
+ *     the ILE. The `IleApiError.kind` is `forbidden`.
+ *
+ * Use this from any "link an existing ILE" flow. The
+ * `id` in the path is the ILE doc's `_id`.
+ */
+export async function linkIleToItem(
+  ileId: string,
+  body: LinkIleToItemRequest,
+  opts?: IleCallOptions,
+): Promise<SaveIleWithItemResponse> {
+  return postJson<SaveIleWithItemResponse>(
+    `/interactive-experiences/${encodeURIComponent(ileId)}/link-item`,
+    body,
+    opts,
+  );
 }
 
 export async function getIleExperience(
@@ -590,33 +779,32 @@ export async function getStudentIlePayload(
 // ─────────────────────────────────────────────────────────────────────
 // Lifecycle — list, version history, rename, duplicate, archive
 
-async function patchJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
-    method: 'PATCH',
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/json',
-      ...authHeaders(),
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`API ${path} failed: ${res.status} ${res.statusText} ${text}`);
-  }
-  return res.json();
+async function patchJson<T>(
+  path: string,
+  body: unknown,
+  opts?: IleCallOptions,
+): Promise<T> {
+  // PATCH is treated like POST for retry purposes — the ILE
+  // PATCH endpoints (archive, unarchive, restore) are not
+  // strictly idempotent but the server tolerates duplicates.
+  return defaultClient.put<T>(
+    path,
+    body,
+    toClientOptions(opts, /* defaultIdempotent */ false),
+  );
 }
 
-async function deleteRequest(path: string): Promise<void> {
-  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
-    method: 'DELETE',
-    credentials: 'include',
-    headers: { ...authHeaders() },
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`API ${path} failed: ${res.status} ${res.statusText} ${text}`);
-  }
+async function deleteRequest(
+  path: string,
+  opts?: IleCallOptions,
+): Promise<void> {
+  // Use the client's DELETE via the unified `request` path.
+  // `delete` is a reserved word in some contexts so the
+  // client method is called `delete`.
+  await defaultClient.delete<void>(
+    path,
+    toClientOptions(opts, /* defaultIdempotent */ true),
+  );
 }
 
 /**
@@ -634,55 +822,17 @@ async function deleteRequest(path: string): Promise<void> {
  * NOTE: AbortSignal.timeout() throws DOMException('TimeoutError') on
  * the fetch promise — we normalise to a plain Error so call sites
  * don't have to special-case it.
+ *
+ * The constant lives in IleApiClient.ts (DEFAULT_REST_TIMEOUT_MS).
+ * Export it from this module too so legacy call-sites that import
+ * it from './ileApi' keep compiling. Importing it from a single
+ * source prevents the "two constants drift apart" hazard.
  */
-export const DEFAULT_REST_TIMEOUT_MS = 30_000;
+export { DEFAULT_REST_TIMEOUT_MS } from './IleApiClient';
 
-async function fetchWithTimeout(
-  input: string | URL | Request,
-  init: RequestInit & { timeoutMs?: number } = {},
-): Promise<Response> {
-  const { timeoutMs = DEFAULT_REST_TIMEOUT_MS, ...rest } = init;
-  // Compose with any caller-provided signal so an explicit cancel
-  // still works (and so callers can chain their own deadlines on top).
-  const signal = rest.signal
-    ? anySignal([rest.signal, AbortSignal.timeout(timeoutMs)])
-    : AbortSignal.timeout(timeoutMs);
-  try {
-    return await fetch(input, { ...rest, signal });
-  } catch (err) {
-    if (
-      err instanceof DOMException &&
-      (err.name === 'TimeoutError' || err.name === 'AbortError')
-    ) {
-      // Re-thrown as a typed Error so callers don't have to special-case
-      // DOMException / TimeoutError across the file.
-      const reason = err.name === 'TimeoutError' ? 'timed out' : 'cancelled';
-      throw new Error(
-        `Request ${reason} after ${timeoutMs}ms (${typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url})`,
-      );
-    }
-    throw err;
-  }
-}
-
-/**
- * Combine multiple AbortSignals into one. Used when the caller passes
- * their own signal (e.g. from React useEffect cleanup) and we also
- * need a timeout. AbortSignal.any is the modern equivalent; we fall
- * back to manual composition for older targets.
- */
-function anySignal(signals: AbortSignal[]): AbortSignal {
-  const controller = new AbortController();
-  const onAbort = () => controller.abort();
-  for (const sig of signals) {
-    if (sig.aborted) {
-      controller.abort();
-      break;
-    }
-    sig.addEventListener('abort', onAbort, { once: true });
-  }
-  return controller.signal;
-}
+// fetchWithTimeout + anySignal moved to ./IleApiClient.ts. The
+// every-REST-helper-inherits-fetch's-no-default-timeout audit
+// (H9, 2026-07-28) is now enforced uniformly through the client.
 
 export async function listIleExperiences(
   opts: { includeArchived?: boolean } = {},
@@ -888,18 +1038,18 @@ export async function getIleAssetSignedUrl(
   );
 }
 
-export async function deleteIleAsset(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/interactive-experiences/assets/${id}`, {
-    method: 'DELETE',
-    credentials: 'include',
-    headers: { ...authHeaders() },
-  });
-  if (!res.ok && res.status !== 204) {
-    const text = await res.text().catch(() => '');
-    throw new Error(
-      `Delete asset failed: ${res.status} ${res.statusText} ${text}`,
-    );
-  }
+export async function deleteIleAsset(
+  id: string,
+  opts?: IleCallOptions,
+): Promise<void> {
+  // The server returns 204 on success; the client's
+  // `request<T>` path handles that and we ignore the
+  // undefined result. The default idempotent=true means
+  // a 204 / network blip will retry safely.
+  await defaultClient.delete<void>(
+    `/interactive-experiences/assets/${id}`,
+    toClientOptions(opts, /* defaultIdempotent */ true),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1143,6 +1293,17 @@ export async function testIleAiConfig(
   );
 }
 
+/**
+ * Disconnect the saved AI provider. Drops the Keystore-encrypted row
+ * from Mongo. The next generate call surfaces the actionable
+ * "Configure AI first" toast from the missing-config error path.
+ *
+ * Idempotent on the server (204 whether or not a row existed).
+ */
+export async function deleteIleAiConfig(): Promise<void> {
+  return deleteRequest(`/interactive-experiences/config`);
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // SSE events
 
@@ -1197,10 +1358,15 @@ export interface GenerateFromContextArgs {
  * Stream a generation or edit. The `eventSource.close()` returned in the
  * second tuple element lets the caller abort mid-stream (used when the user
  * navigates away or sends a new prompt).
+ *
+ * Pass `signal` to plug the queue's AbortController into the underlying
+ * fetch — without it, the stream keeps running on the wire even after the
+ * caller cancels.
  */
 export function streamIleGeneration(
   args: GenerateArgs,
   onEvent: (event: IleStreamEvent) => void,
+  options: { signal?: AbortSignal } = {},
 ): () => void {
   const token = getAuthToken() ?? '';
   // fetch-based SSE — see openIleSse for why we don't use the
@@ -1211,6 +1377,7 @@ export function streamIleGeneration(
     `${API_BASE}/interactive-experiences/generate/stream`,
     args,
     token,
+    options.signal,
   );
 
   bindIleStream(es, onEvent);
@@ -1221,12 +1388,14 @@ export function streamIleGeneration(
 export function streamIleEdit(
   args: EditArgs,
   onEvent: (event: IleStreamEvent) => void,
+  options: { signal?: AbortSignal } = {},
 ): () => void {
   const token = getAuthToken() ?? '';
   const es = openIleSse(
     `${API_BASE}/interactive-experiences/${args.experienceId}/edit/stream`,
     { prompt: args.prompt },
     token,
+    options.signal,
   );
 
   bindIleStream(es, onEvent);
@@ -1240,12 +1409,14 @@ export function streamIleEdit(
 export function streamIleGenerationFromContext(
   args: GenerateFromContextArgs,
   onEvent: (event: IleStreamEvent) => void,
+  options: { signal?: AbortSignal } = {},
 ): () => void {
   const token = getAuthToken() ?? '';
   const es = openIleSse(
     `${API_BASE}/interactive-experiences/generate/from-context/stream`,
     args,
     token,
+    options.signal,
   );
 
   bindIleStream(
@@ -1270,22 +1441,14 @@ export function streamIleGenerationFromContext(
 export async function askCoach(
   experienceId: string,
   prompt: string,
+  opts?: IleCallOptions,
 ): Promise<{ hint: string }> {
-  const token = getAuthToken() ?? '';
-  const res = await fetch(
-    `${API_BASE}/interactive-experiences/${experienceId}/coach`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + token,
-      },
-      body: JSON.stringify({ prompt }),
-    },
+  // Coach requests are NOT retried — the model is stateful and
+  // a duplicate POST could surface a stale assistant turn.
+  const data = await defaultClient.post<{ hint?: string }>(
+    `/interactive-experiences/${experienceId}/coach`,
+    { prompt },
+    toClientOptions(opts, /* defaultIdempotent */ false),
   );
-  if (!res.ok) {
-    throw new Error(`Coach request failed: ${res.status} ${res.statusText}`);
-  }
-  const data = (await res.json()) as { hint?: string };
   return { hint: data.hint ?? 'The coach is thinking...' };
 }

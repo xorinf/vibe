@@ -193,4 +193,20 @@ export class IleAiConfigService {
   async loadConfigForOwner(ownerId: string): Promise<IleAiConfig | null> {
     return this.repo.findByOwner(ownerId);
   }
+
+  /**
+   * Delete the per-owner AI config (drops the envelope from Mongo).
+   * Idempotent: returns `false` when no row existed.
+   *
+   * Wired so the AI Config panel can offer a "Disconnect" button.
+   * Without this, the only way to remove a saved key was to overwrite
+   * the field with garbage — and the panel's "empty apiKey preserves
+   * the prior key" rule made even that impossible without backend help.
+   */
+  async deleteForOwner(ownerId: string): Promise<boolean> {
+    const existing = await this.repo.findByOwner(ownerId);
+    if (!existing) return false;
+    await this.repo.delete(ownerId);
+    return true;
+  }
 }

@@ -35,11 +35,14 @@ import {
   IleIdParam,
   IleVersionParam,
   ILE_ASSET_UPLOAD_OPTIONS,
+  ILE_ASSET_UPLOAD_UNION_OPTIONS,
   ListIleAssetsQuery,
   RenameIleBody,
   SaveIleBody,
+  SaveWithItemBody,
   TestIleAiConfigBody,
   VersionedSaveIleBody,
+  LinkItemBody,
 } from '../classes/validators/IleValidators.js';
 import {
   IngestStudentEventsBody,
@@ -133,6 +136,24 @@ class IleErrorResponse {
   message: string;
 }
 
+/**
+ * Response shape for POST /interactive-experiences/save-with-item.
+ * Returns the ILE doc and (when the save was bound to a course item)
+ * the post-save itemsGroup row. The frontend uses the itemsGroup
+ * state to immediately update the section's item list (status pill,
+ * experienceId pointer) without a follow-up PATCH.
+ */
+class SaveWithItemResponse {
+  ile: IleExperienceResponse;
+  item?: {
+    _id: string;
+    type: string;
+    name: string;
+    description: string;
+    details?: any;
+  };
+}
+
 class IleAiConfigStatusResponse {
   configured: boolean;
   config: IleAiConfigResponse | null;
@@ -224,6 +245,27 @@ export class IleController {
   }
 
   /**
+   * DELETE /api/interactive-experiences/config
+   *
+   * Disconnect the owner's saved AI provider — drops the envelope from
+   * Mongo. Idempotent: 204 whether or not a row existed. The next
+   * generate call will surface the actionable "Configure AI first" toast.
+   *
+   * Wired so the AI Config panel can offer a Disconnect button instead
+   * of relying on the (broken) "leave the apiKey field empty to wipe"
+   * workflow, which the empty-apiKey-preserves-prior-key rule made
+   * impossible from the UI.
+   */
+  @Delete('/config')
+  @HttpCode(204)
+  @OpenAPI({ summary: 'Delete the ILE AI configuration for the current owner.' })
+  async deleteAiConfig(@CurrentUser() user: IUser): Promise<null> {
+    if (!user?._id) throw new BadRequestError('Authenticated user required');
+    await this.ileAiConfig.deleteForOwner(String(user._id));
+    return null;
+  }
+
+  /**
    * POST /api/interactive-experiences/config/test
    *
    * Returns a stable four-state status: connected / invalid_key /
@@ -268,7 +310,10 @@ export class IleController {
   @HttpCode(201)
   @OpenAPI({ summary: 'Upload an asset (image/audio/video/pdf/svg/markdown).' })
   async uploadAsset(
-    @UploadedFile('file', { options: undefined })
+    // The route accepts the UNION of all kinds' mimetypes + the LARGEST
+    // kind's maxBytes (currently 50MB). Per-kind narrow happens below
+    // — see ILE_ASSET_UPLOAD_UNION_OPTIONS in IleValidators.ts.
+    @UploadedFile('file', { options: ILE_ASSET_UPLOAD_UNION_OPTIONS })
     file: Express.Multer.File | undefined,
     @Body() body: { kind?: IleAssetKind },
     @CurrentUser() user: IUser,
@@ -363,10 +408,11 @@ export class IleController {
   async deleteAsset(
     @Param('id') id: string,
     @CurrentUser() user: IUser,
-  ): Promise<void> {
+  ): Promise<null> {
     if (!user?._id) throw new BadRequestError('Authenticated user required');
     const ok = await this.ileAsset.delete(String(user._id), id);
     if (!ok) throw new NotFoundError('Asset not found');
+    return null;
   }
 
   // ───────────────────────────────────────────────────────────────────
@@ -418,10 +464,16 @@ export class IleController {
 
     // We need courseId + courseVersionId to scope analytics. The
     // sandbox doesn't know them, so the host page passes them in the
-    // body. We accept them as optional query fields for now; the
-    // host can include them in a future iteration.
-    const courseId = (req.query?.courseId as string) || 'unknown';
-    const courseVersionId = (req.query?.courseVersionId as string) || 'unknown';
+    // body / query string. Missing the context silently corrupts the
+    // per-course analytics (events get bucketed under 'unknown') so
+    // 400 instead of filling the cohort with ghost rows.
+    const courseId = (req.query?.courseId as string) || undefined;
+    const courseVersionId = (req.query?.courseVersionId as string) || undefined;
+    if (!courseId || !courseVersionId) {
+      throw new BadRequestError(
+        'Missing required query params: courseId and courseVersionId. The host page must supply them so analytics are scoped to the right course.',
+      );
+    }
 
     const result = await this.ileAnalytics.ingest({
       experienceId: id,
@@ -698,15 +750,22 @@ export class IleController {
    *
    * SECURITY: This endpoint is intentionally NOT @Authorized() — CSP
    * reports come from the iframe which has an opaque origin, and the
-   * rate of false reports is benign. We do, however, cap payload size
-   * to keep a hostile origin from filling our logs.
+   * rate of false reports is benign. We do, however, cap the body
+   * size via express.json({limit}) so a hostile origin can't fill our
+   * logs with megabytes of nonsense (the express body-parser limit
+   * protects us; routing-controllers uses express.json globally with
+   * a 100KB default). The parseCspReport helper additionally trims
+   * the source-file/sample strings before logging.
    */
   @Post('/csp-report')
   @HttpCode(204)
   @OpenAPI({
     summary: 'CSP violation report endpoint (browser POST).',
   })
-  async cspReport(@Body() body: unknown, @Req() req: Request): Promise<void> {
+  async cspReport(
+    @Body() body: unknown,
+    @Req() req: Request,
+  ): Promise<null> {
     const report = extractCspReport(body);
     ileLog('warn', 'csp.violation', {
       blockedUri: report.blockedUri,
@@ -719,6 +778,7 @@ export class IleController {
       disposition: report.disposition,
       sample: report.sample,
     });
+    return null;
   }
 
   /**
@@ -775,6 +835,148 @@ export class IleController {
       label: body.label,
     });
     return this.toResponse(saved);
+  }
+
+  /**
+   * Single-source-of-truth save. Persists the ILE doc AND patches the
+   * matching itemsGroup row in the same Mongo transaction. Replaces
+   * the two-step pattern (POST / save, then PATCH the itemsGroup from
+   * the frontend) that was the root cause of orphan-row bugs.
+   *
+   * Use this endpoint from any UI path that has a course context:
+   *   - The ILE workspace's Save button.
+   *   - The "Add Item → Interactive Experience" first-save flow.
+   *   - The ILE library's "Save & attach to section" flow.
+   *
+   * For library-only experiences (no itemsGroup row yet), the
+   * itemsGroup update is skipped; the ILE doc still saves.
+   *
+   * Validation here is defense-in-depth: the SaveWithItemBody
+   * validator already enforces shape (required title/html, length
+   * caps, etc.). This method enforces semantic rules that don't
+   * fit cleanly in a class-validator decorator — e.g. "the
+   * experienceId pointer must be a valid ObjectId when provided".
+   */
+  @Post('/save-with-item')
+  @ResponseSchema(SaveWithItemResponse)
+  @OpenAPI({
+    summary:
+      'Save an experience and sync its itemsGroup pointer in a single transaction.',
+  })
+  async saveWithItem(
+    @Body() body: SaveWithItemBody,
+    @CurrentUser() user: IUser,
+  ): Promise<SaveWithItemResponse> {
+    const ownerId = this.requireOwnerId(user);
+    const { ile, item } = await this.ile.saveAndSync(
+      this.toSaveArgs(body, ownerId, user),
+      { itemId: body.itemId },
+    );
+    return this.toSaveWithItemResponse(ile, item);
+  }
+
+  /**
+   * Project the request body to the service-layer SaveArgs shape.
+   * Centralized so the controller and service share the same
+   * field-by-field mapping. `courseId` / `courseVersionId` are
+   * normalized to empty strings (the service expects strings, not
+   * undefined, so the ILE doc always has the field set).
+   */
+  private toSaveArgs(
+    body: SaveWithItemBody,
+    ownerId: string,
+    user: IUser,
+  ): import('../services/IleService.js').SaveArgs {
+    return {
+      ownerId,
+      authorName: this.authorName(user),
+      _id: body._id,
+      courseId: body.courseId ?? '',
+      courseVersionId: body.courseVersionId ?? '',
+      itemId: body.itemId,
+      title: body.title,
+      prompt: body.prompt,
+      html: body.html,
+      label: body.label,
+    };
+  }
+
+  /**
+   * Build the response shape from the service result. The items
+   * group state is only included when the save actually patched a
+   * row — the controller never fabricates a row.
+   */
+  private toSaveWithItemResponse(
+    ile: IleExperience,
+    item: any | null | undefined,
+  ): SaveWithItemResponse {
+    const response: SaveWithItemResponse = { ile: this.toResponse(ile) };
+    if (item) {
+      response.item = {
+        _id: String(item._id),
+        type: item.type,
+        name: item.name,
+        description: item.description,
+        details: item.details,
+      };
+    }
+    return response;
+  }
+
+  /**
+   * Defensive: every authenticated route in this controller
+   * assumes `user._id` is set. Rather than scatter
+   * `if (!user?._id) throw` everywhere, centralize the check
+   * and project a single typed ownerId string.
+   */
+  private requireOwnerId(user: IUser): string {
+    if (!user?._id) {
+      throw new BadRequestError('Authenticated user required');
+    }
+    return String(user._id);
+  }
+
+  /**
+   * Wire an existing ILE doc to a course item. The frontend's
+   * "Link existing experience" picker calls this; the previous
+   * implementation PATCHed the itemsGroup row directly via the
+   * generic `/api/courses/.../items/...` endpoint, which (a)
+   * required course-level write permission that a teacher
+   * doesn't always have, and (b) didn't update the ILE doc's
+   * own `itemId` field, so the link was a one-way pointer.
+   *
+   * The new endpoint takes the ILE id from the URL path and
+   * the itemsGroup row id from the body, opens a transaction
+   * on the service layer, and returns the post-link state
+   * of both records. The service throws a ForbiddenError if
+   * the caller doesn't own the ILE — we re-throw it here so
+   * routing-controllers maps it to a 403.
+   */
+  @Post('/:id/link-item')
+  @ResponseSchema(SaveWithItemResponse)
+  @OpenAPI({
+    summary:
+      'Link an existing experience to a course item. Atomic write.',
+  })
+  async linkItem(
+    @Param('id') id: string,
+    @Body() body: LinkItemBody,
+    @CurrentUser() user: IUser,
+  ): Promise<SaveWithItemResponse> {
+    const ownerId = this.requireOwnerId(user);
+    // The service throws routing-controllers' ForbiddenError /
+    // NotFoundError directly, so routing-controllers' default
+    // error handler maps them to 403 / 404 with the standard
+    // envelope. No try/catch hop needed — the previous
+    // implementation translated a stringly-named `Error` and
+    // it just drifted from the routed handlers over time.
+    const { ile, item } = await this.ile.linkItem(id, ownerId, {
+      courseId: body.courseId,
+      courseVersionId: body.courseVersionId,
+      itemId: body.itemId,
+      label: body.label,
+    });
+    return this.toSaveWithItemResponse(ile, item);
   }
 
   /**
@@ -977,10 +1179,11 @@ export class IleController {
   async delete(
     @Param('id') id: string,
     @CurrentUser() user: IUser,
-  ): Promise<void> {
+  ): Promise<null> {
     if (!user?._id) throw new BadRequestError('Authenticated user required');
     const ok = await this.ile.softDelete(id, String(user._id));
     if (!ok) throw new NotFoundError('Experience not found');
+    return null;
   }
 
   /**
@@ -1158,16 +1361,6 @@ function extractCspReport(body: unknown): {
   sample?: string;
   disposition?: string;
 } {
-  const findField = (...objects: any[]): any | undefined => {
-    for (const o of objects) {
-      if (o && typeof o === 'object') {
-        for (const k of Object.keys(o)) {
-          if (k in o) return o[k];
-        }
-      }
-    }
-    return undefined;
-  };
   const root: any = Array.isArray(body)
     ? body[0]
     : body && typeof body === 'object'

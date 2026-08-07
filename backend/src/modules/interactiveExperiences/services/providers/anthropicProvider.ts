@@ -14,11 +14,25 @@ import {
  * because long completions can have quiet stretches — but small enough
  * that a dead stream doesn't leak money.
  *
- * SECURITY-TODO(production): keep this tunable via env. The local dev
- * default is fine; production should set ILE_UPSTREAM_TIMEOUT_MS based
- * on observed p99 latencies for the chosen model.
+ * Tune via `ILE_UPSTREAM_TIMEOUT_MS`. Production should set this
+ * based on observed p99 latencies for the chosen model.
  */
-const UPSTREAM_DEADLINE_MS = 120_000;
+const DEFAULT_UPSTREAM_TIMEOUT_MS = 120_000;
+
+function resolveUpstreamTimeoutMs(): number {
+  const raw = process.env.ILE_UPSTREAM_TIMEOUT_MS;
+  if (!raw) return DEFAULT_UPSTREAM_TIMEOUT_MS;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[ile] ILE_UPSTREAM_TIMEOUT_MS=${raw} is not a positive integer; using default ${DEFAULT_UPSTREAM_TIMEOUT_MS}ms.`,
+    );
+    return DEFAULT_UPSTREAM_TIMEOUT_MS;
+  }
+  return parsed;
+}
+const UPSTREAM_DEADLINE_MS = resolveUpstreamTimeoutMs();
 
 /**
  * Anthropic-specific stop reasons that mean the response was truncated
