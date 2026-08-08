@@ -412,6 +412,47 @@ export function useIleEditor(): UseIleEditorApi {
       // "this stream is done" signal that the consumer hook can
       // await instead of relying on a state-machine transition.
       const onEvent = (ev: IleStreamEvent) => {
+        // The setStream updater MUST be a pure derivation from
+        // `prev`. Calling `setMessages` from inside it would
+        // double-update the assistant bubble in StrictMode (which
+        // double-invokes every updater in development), and even
+        // outside StrictMode would double-fire when React batches
+        // multiple deltas into one render tick. Apply the message
+        // append here as a peer update so the stream updater
+        // stays pure.
+        if (ev.kind === 'html') {
+          const delta = ev.delta;
+          setMessages((ms) =>
+            ms.map((m) =>
+              m.inFlight ? { ...m, html: (m.html ?? '') + delta } : m,
+            ),
+          );
+        } else if (ev.kind === 'done') {
+          setMessages((ms) =>
+            ms.map((m) =>
+              m.inFlight
+                ? {
+                    ...m,
+                    html: ev.html || m.html,
+                    content: ev.truncated
+                      ? 'Applied (response was truncated — try a shorter prompt)'
+                      : 'Edit applied',
+                    inFlight: false,
+                  }
+                : m,
+            ),
+          );
+          inFlightMsgIdRef.current = null;
+        } else if (ev.kind === 'error') {
+          setMessages((ms) =>
+            ms.map((m) =>
+              m.inFlight
+                ? { ...m, content: `Error: ${ev.message}`, inFlight: false }
+                : m,
+            ),
+          );
+          inFlightMsgIdRef.current = null;
+        }
         setStream((prev) => {
           // Defensive: the very first event in a stream can race
           // a state reset, leaving prev undefined for one frame.
@@ -437,13 +478,6 @@ export function useIleEditor(): UseIleEditorApi {
             case 'reasoning':
               return { ...base, reasoning: true };
             case 'html':
-              setMessages((ms) =>
-                ms.map((m) =>
-                  m.inFlight
-                    ? { ...m, html: (m.html ?? '') + ev.delta }
-                    : m,
-                ),
-              );
               return {
                 ...base,
                 html: base.html + ev.delta,
@@ -453,21 +487,6 @@ export function useIleEditor(): UseIleEditorApi {
             case 'done':
               headHtmlRef.current = ev.html;
               experienceIdRef.current = ev.experienceId;
-              setMessages((ms) =>
-                ms.map((m) =>
-                  m.inFlight
-                    ? {
-                        ...m,
-                        html: ev.html || m.html,
-                        content: ev.truncated
-                          ? 'Applied (response was truncated — try a shorter prompt)'
-                          : 'Edit applied',
-                        inFlight: false,
-                      }
-                    : m,
-                ),
-              );
-              inFlightMsgIdRef.current = null;
               return {
                 ...base,
                 status: 'done',
@@ -477,14 +496,6 @@ export function useIleEditor(): UseIleEditorApi {
                 truncated: ev.truncated ?? base.truncated,
               };
             case 'error':
-              setMessages((ms) =>
-                ms.map((m) =>
-                  m.inFlight
-                    ? { ...m, content: `Error: ${ev.message}`, inFlight: false }
-                    : m,
-                ),
-              );
-              inFlightMsgIdRef.current = null;
               return {
                 ...base,
                 status: 'error',
@@ -548,6 +559,10 @@ export function useIleEditor(): UseIleEditorApi {
                   ? { ...prev, status: 'idle' }
                   : prev,
               );
+              // ponytail: clear the queued "pending" hint so the
+              // composer doesn't keep showing "Queued — current edit
+              // will finish first" after the stream is cancelled.
+              setPending(false);
               return;
             }
             // Real failure — show the error UI but still transition
@@ -563,6 +578,7 @@ export function useIleEditor(): UseIleEditorApi {
                   }
                 : prev,
             );
+            setPending(false);
           },
         );
     },

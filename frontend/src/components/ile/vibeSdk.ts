@@ -217,10 +217,14 @@ export const VIBE_IFRAME_CSP =
   // allowed for inline thumbnails the model might emit.
   "img-src https: data:; " +
   "media-src https: data:; " +
-  // PDFs are embedded via <iframe src="...">. We pin frame-src to
-  // https: so the model can't redirect the iframe to an arbitrary
-  // site — but we still need a source, hence https:, not 'none'.
-  "frame-src https:; " +
+  // PDFs are embedded via <iframe src="...">. We pin frame-src
+  // to the signed-GCS host pair so the model can't redirect the
+  // iframe to an arbitrary site (a phishing risk if frame-src
+  // were just `https:`). Cover googleapis.com (the canonical
+  // signed-URL host) and googleusercontent.com (the public-CDN
+  // fallback). Teachers who legitimately need a different host
+  // can extend this list via the iframe CSP override.
+  "frame-src https://storage.googleapis.com https://*.googleusercontent.com; " +
   "font-src https: data:; " +
   "connect-src 'none'; " +
   "object-src 'none'; " +

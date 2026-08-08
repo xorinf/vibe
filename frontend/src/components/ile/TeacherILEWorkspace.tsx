@@ -45,14 +45,15 @@ import {
   History as HistoryIcon,
   Check,
   Settings2,
-  X,
   Save,
   Loader2,
   Pencil,
+  ArrowLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { type CodeEditorHandle } from './CodeEditor';
 import { AiConfigPanel, AiConfigFormBody } from './AiConfigPanel';
+import { ILE_SAVED_EVENT } from './ileEvents';
 import { ActionsMenu } from './ActionsMenu';
 import { useIleEditor } from './useIleEditor';
 import { useIleContextGeneration } from './useIleContextGeneration';
@@ -60,8 +61,10 @@ import { useWorkspaceLayout } from './useWorkspaceLayout';
 import {
   getIleExperience,
   saveIleExperience,
+  saveIleExperienceWithItem,
   publishIleExperience,
   type IleExperienceResponse,
+  type SaveIleWithItemResponse,
 } from './ileApi';
 import {
   ActivityBar,
@@ -253,15 +256,26 @@ export function TeacherILEWorkspace({
   }, [editorState.stream.truncated, editorState.stream.status]);
 
   // The HTML the preview + auto-save + Monaco will read. Resolution
-  // chain: manual edit > stream output > initial > saved.
-  const effectiveHtml =
-    manualHtml ??
-    (editorState.stream.status === 'done' || editorState.stream.status === 'streaming'
-      ? editorState.stream.html
-      : null) ??
-    editorState.initialHtml ??
-    saved?.html ??
-    '';
+  // chain (with the streaming-during-stream override that the
+  // original ordering got wrong):
+  //   - If a stream is in flight, the live `stream.html` ALWAYS
+  //     wins. The teacher can't type during streaming (`readOnly`
+  //     is enforced by the editor's compartment) so any `manualHtml`
+  //     value is necessarily a stale snapshot from a previous run —
+  //     using it here would lock the editor at the first-delta
+  //     snapshot even though `stream.html` keeps accumulating.
+  //   - If no stream is in flight, fall back to manual > initial >
+  //     saved.
+  const streamInFlight = editorState.stream.status === 'streaming';
+  const effectiveHtml = streamInFlight
+    ? editorState.stream.html
+    : (manualHtml ??
+      (editorState.stream.status === 'done'
+        ? editorState.stream.html
+        : null) ??
+      editorState.initialHtml ??
+      saved?.html ??
+      '');
 
   // True when the current effective HTML differs from the persisted
   // saved snapshot. Used by the auto-save timer, the beforeunload
@@ -273,12 +287,30 @@ export function TeacherILEWorkspace({
     effectiveHtml !== (saved?.html ?? '');
 
   useEffect(() => {
-    if (editorState.stream.status === 'done') {
+    if (editorState.stream.status === 'done' || editorState.stream.status === 'error') {
       const streamHtml = editorState.stream.html;
-      if (manualHtml === null || manualHtml === streamHtml) {
-        editorHandleRef.current?.setValue(streamHtml);
-        setManualHtml(null);
-      }
+      // Always reconcile the editor content with the final stream
+      // value when a stream lands. The previous equality check
+      // (`manualHtml === streamHtml`) skipped this when the editor
+      // had been frozen at an earlier snapshot — which is exactly
+      // the streaming-stuck bug we just fixed; the rescue path
+      // must run unconditionally so a frozen editor gets unstuck
+      // every time a stream completes (or errors out).
+      editorHandleRef.current?.setValue(streamHtml);
+      // ponytail: only clear manualHtml if it was already saved
+      // (matches saved?.html). If the teacher typed something the
+      // stream is about to overwrite, surface a toast so the silent
+      // data loss stops. The flag compares against the saved html
+      // because that's the durable baseline; an unsaved manual edit
+      // diverges from saved and gets preserved alongside the stream.
+      setManualHtml((prev) => {
+        if (prev === null) return null;
+        if (prev === saved?.html) return null;
+        toast.warning(
+          'Your unsaved typing was replaced by the AI output. Re-apply from undo (Ctrl+Z) if you want it back.',
+        );
+        return prev;
+      });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorState.stream.status, editorState.stream.html]);
@@ -292,9 +324,22 @@ export function TeacherILEWorkspace({
 
   const handleCodeChange = useCallback(
     (next: string) => {
+      // Backstop: ignore any onChange that fires while a stream is
+      // in flight. Without this guard, a single stray
+      // `setManualHtml(next)` from a programmatic dispatch's
+      // listener would latch manualHtml to a snapshot of the
+      // streaming HTML and freeze the editor — exactly the bug
+      // the user has been hitting. The CodeMirror listener is
+      // supposed to skip programmatic writes via the `userEvent:
+      // ile.programmatic` tag, but a missing tag (or a future
+      // extension) shouldn't be enough to break the workspace.
+      const status = editorState.stream.status;
+      if (status === 'streaming') {
+        return;
+      }
       setManualHtml(next);
     },
-    [],
+    [editorState.stream.status],
   );
 
   // Auto-save after 1.5s of no manual edits.
@@ -313,6 +358,35 @@ export function TeacherILEWorkspace({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manualHtml, editorState.stream.status]);
+
+  // Auto-save when the AI stream completes. The chat pane's
+  // edit-applied card + Accept/Reject UI assume that after a
+  // stream, the doc is durable on the server — but until the
+  // teacher presses Save (or the auto-save timer fires from a
+  // manualHtml change), the post-stream html only lives in
+  // `editorState.stream.html`. If the teacher closes the
+  // workspace before saving, their work is gone.
+  //
+  // Before this guard, the only auto-save trigger was a
+  // manualHtml change in the source editor. The chat pane's
+  // `accept()` flow never persisted anything on its own, and the
+  // generation flow's "Edit applied" toast implied durability
+  // that didn't exist. This effect closes the gap: when the
+  // stream lands on `'done'` AND the html differs from what we
+  // have persisted locally, fire a debounced save.
+  useEffect(() => {
+    if (editorState.stream.status !== 'done') return;
+    if (!editorState.stream.experienceId) return;
+    if (editorState.stream.html === saved?.html) return;
+    // Skip if a manualHtml-triggered save is already scheduled —
+    // otherwise we double-save on every accept + edit round.
+    if (autoSaveTimerRef.current) return;
+    const timer = setTimeout(() => {
+      void handleSaveRef.current?.();
+    }, 1500);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorState.stream.status, editorState.stream.html, editorState.stream.experienceId]);
 
   const handleSaveRef = useRef<() => Promise<void> | undefined>(undefined);
 
@@ -352,21 +426,41 @@ export function TeacherILEWorkspace({
     }
     setSaving(true);
     try {
-      // 1. Persist the html (creates a new ILE doc on first save,
-      //    or updates the existing one). The backend returns the
-      //    canonical doc with its new _id + version.
-      const savedDraft = await saveIleExperience({
-        _id: editorState.stream.experienceId,
-        courseId,
-        courseVersionId,
-        itemId,
-        title: title || 'Untitled Experience',
-        // prompt is optional on the backend (defaults to a placeholder
-        // if absent) — pass through undefined when we don't have it
-        // loaded yet (e.g. fresh-canvas before history hydrates).
-        prompt: saved?.prompt,
-        html,
-      });
+      // 1. Persist the html AND sync the itemsGroup row in a single
+      //    backend transaction. When the workspace is bound to a
+      //    course item (itemsGroupItemId or itemId from the dialog
+      //    context), use the unified save-with-item endpoint; the
+      //    backend writes both the ILE doc and the itemsGroup $set
+      //    under one Mongo transaction so a crash between writes
+      //    can't leave the section pointing at a stale experienceId.
+      //
+      //    For library-only saves (no course context) we fall back
+      //    to the plain save endpoint.
+      const targetItemId = itemsGroupItemId ?? itemId;
+      const hasCourseContext = !!(targetItemId && courseId && courseVersionId);
+      let savedDraft: IleExperienceResponse;
+      if (hasCourseContext) {
+        const unified: SaveIleWithItemResponse = await saveIleExperienceWithItem({
+          _id: editorState.stream.experienceId,
+          courseId,
+          courseVersionId,
+          itemId: targetItemId,
+          title: title || 'Untitled Experience',
+          prompt: saved?.prompt,
+          html,
+        });
+        savedDraft = unified.ile;
+      } else {
+        savedDraft = await saveIleExperience({
+          _id: editorState.stream.experienceId,
+          courseId,
+          courseVersionId,
+          itemId,
+          title: title || 'Untitled Experience',
+          prompt: saved?.prompt,
+          html,
+        });
+      }
 
       // 2. Immediately flip the saved draft to 'published' so
       //    closing the workspace and returning to the course page
@@ -401,21 +495,21 @@ export function TeacherILEWorkspace({
             ? 'Saved as draft.'
             : 'Draft updated.',
       );
-      // Notify the section that hosts this ILE so it can patch the
-      // itemsGroup row's details.experienceId + status + version.
-      // The teacher page listens and fires PATCH /courses/.../items/...
-      // so the section's item list mirrors the latest saved state,
-      // including the published status.
+      // Notify the section that hosts this ILE so it can refresh its
+      // item list (status pill, experienceId pointer, etc.). With
+      // the unified save endpoint the backend has already done the
+      // ILE doc + itemsGroup $set atomically — this event is now a
+      // pure "go re-fetch" signal for the section. The teacher page
+      // listens and runs refetchVersion() + refetchItems().
       //
-      // NB: status flows from the post-publish doc, not the draft,
-      // so the itemsGroup row is marked published on the very first
-      // save. Detail pointer is empty when the ILE doc is first
-      // created; after the first save the ILE doc has its real _id.
+      // Status flows from the post-publish doc, not the draft, so
+      // the itemsGroup row is marked published on the very first
+      // save.
       try {
         window.dispatchEvent(
-          new CustomEvent('ile:saved', {
+          new CustomEvent(ILE_SAVED_EVENT, {
             detail: {
-              itemsGroupItemId: itemsGroupItemId ?? itemId,
+              itemsGroupItemId: targetItemId,
               experienceId: finalDoc._id,
               currentVersion: finalDoc.currentVersion,
               status: finalDoc.status ?? 'published',
@@ -426,12 +520,62 @@ export function TeacherILEWorkspace({
           }),
         );
       } catch {
-        /* non-fatal: the section-level patch is a soft signal,
+        /* non-fatal: the section-level refresh is a soft signal,
            not required for correctness — the inline workspace still
            keeps its own saved state in `saved` above */
       }
     } catch (err: any) {
-      toast.error(err?.message ?? 'Save failed');
+      // Backend rejected the save (validation, network, 5xx, etc.).
+      // The single-source-of-truth endpoint writes the ILE doc and
+      // the itemsGroup $set in one transaction, so a failure here
+      // means NEITHER was written. The teacher can safely retry
+      // — nothing is in a half-saved state.
+      //
+      // The `IleApiError` hierarchy lets us render kind-specific
+      // copy + actions. For transient failures (timeout, 5xx,
+      // network) we offer a Retry button. For auth failures we
+      // surface a sign-in hint instead — a Retry would just
+      // hit the same 401. For validation we surface the raw
+      // message (class-validator already formats it).
+      const apiErr = err as
+        | (Error & { kind?: string; retriable?: boolean; status?: number | null })
+        | undefined;
+      const kind = apiErr?.kind ?? 'unknown';
+      const retriable = apiErr?.retriable ?? true;
+      const message = apiErr?.message ?? 'Save failed — your draft was not saved.';
+
+      // Kind-specific copy. Falls back to the raw API message
+      // for everything else (validation, unknown).
+      const friendly: Record<string, string> = {
+        timeout: 'Save timed out — your draft was not lost. Check your connection and retry.',
+        network: "Can't reach the ILE service — your draft was not lost. Check your network and retry.",
+        server: 'The ILE service is having trouble — your draft was not lost. Try again in a moment.',
+        auth: 'Your session expired. Sign in again and the draft will be restored.',
+        forbidden: "You don't have permission to save here. Check the course role.",
+        not_found: 'The item you were saving against is missing. Open the workspace from the section tree.',
+        validation: message,
+      };
+      const toastMessage = friendly[kind] ?? message;
+
+      // Only attach a Retry action for transient kinds. For
+      // auth/forbidden/not_found the teacher needs a different
+      // action (sign in, switch course, etc.) which is out of
+      // scope for an inline toast button.
+      const action = retriable
+        ? {
+            label: 'Retry',
+            onClick: () => {
+              // Re-invoke the same handleSave. The HTML is
+              // still in editorState.stream / manualHtml;
+              // nothing was mutated by the failed save.
+              void handleSaveRef.current?.();
+            },
+          }
+        : undefined;
+      toast.error(toastMessage, {
+        duration: 8000,
+        ...(action ? { action } : {}),
+      });
     } finally {
       setSaving(false);
     }
@@ -441,6 +585,7 @@ export function TeacherILEWorkspace({
     courseId,
     courseVersionId,
     itemId,
+    itemsGroupItemId,
     title,
     saved?.prompt,
     manualHtml,
@@ -565,6 +710,25 @@ export function TeacherILEWorkspace({
           'flex shrink-0 items-center gap-2 border-b border-border  bg-background  px-3',
         )}
       >
+        {/* Back button — the teacher's primary "return to dashboard"
+            affordance. Always visible, on the far left of the
+            header, so it reads as the first place a teacher's eye
+            lands. Calls onClose() which closes the dialog and returns
+            the teacher to wherever they came from (course page, ILE
+            library, etc.). The unsaved-changes confirmation in
+            handleClose already guards accidental loss. */}
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={handleClose}
+          aria-label="Back to course"
+          title="Back to course (Esc)"
+          data-testid="ile-workspace-back"
+          className="h-8 gap-1 px-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Back</span>
+        </Button>
         <div className="flex min-w-0 items-center gap-2">
           <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary/15 text-primary">
             <Sparkles className="h-3.5 w-3.5" />
@@ -592,7 +756,7 @@ export function TeacherILEWorkspace({
               ) : null}
             </div>
             <p className="truncate text-[11px] text-muted-foreground ">
-              Interactive Learning Experience
+              Interactive Experience
               {courseVersionId ? ` · course ${courseVersionId.slice(-6)}` : ''}
             </p>
           </div>
@@ -685,17 +849,6 @@ export function TeacherILEWorkspace({
               <span className="hidden md:inline">Refresh</span>
             </Button>
           ) : null}
-
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleClose}
-            aria-label="Close workspace"
-            title="Close"
-            className="h-8 w-8 text-muted-foreground  hover:bg-accent hover:text-accent-foreground"
-          >
-            <X className="h-4 w-4" />
-          </Button>
         </div>
       </header>
 
@@ -715,6 +868,16 @@ export function TeacherILEWorkspace({
             state={editorState}
             api={editor}
             onSubmit={send}
+            onAcceptOrReject={() => {
+              // Accept/Reject in the chat pane only update in-memory
+              // UI state (`previousHtml`, `lastAppliedAt`). Without
+              // this hook they look pressed but nothing reaches the
+              // server — the doc stays wherever the previous save
+              // left it. Flush to disk through the existing handleSave
+              // ref so we reuse the same retry / toast / 403 / 404
+              // handling the manual Save button uses.
+              void handleSaveRef.current?.();
+            }}
             onContextSelected={(args: { source: 'youtube' | 'markdown'; input: string; prompt: string }) => {
               if (!courseId || !courseVersionId) {
                 toast.error('Open this experience from a course item to use context.');

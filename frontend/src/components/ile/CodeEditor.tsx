@@ -369,9 +369,7 @@ export function CodeEditor({
         // Wrapped in a compartment so we can swap it out mid-session
         // if the parser starts throwing on the streaming input.
         //
-        // ponytail: start with the html() extension REMOVED. The
-        // exceptionSink re-enables it only when the parser proves
-        // safe on a small probe. The @lezer/html parser throws
+        // ponytail: start disabled. The @lezer/html parser throws
         // `undefined is not an object (evaluating 'this._tree_
         // .children.length')` on partial streaming input — the
         // throw propagates to the React error boundary, which
@@ -380,12 +378,13 @@ export function CodeEditor({
         // exceptionSink DOES fire on the dispatcher path, but
         // the parser throws BEFORE the sink in some cases (the
         // sink can't catch what the parser already threw). The
-        // robust fix: don't enable the parser at all by default;
-        // the ILE streaming edits are read-only while they're
-        // happening, so the teacher never sees syntax highlighting
-        // go on during a stream anyway. The compartment is left
-        // here so a future "post-stream syntax highlight" toggle
-        // can reconfigure it without a remount.
+        // robust fix: don't enable the parser at all. The ILE
+        // streaming edits are read-only while they're happening,
+        // so the teacher never sees syntax highlighting during a
+        // stream anyway. The compartment is left in the
+        // extensions list (stubbed) so the exceptionSink can
+        // reconfigure it without a remount if a future change
+        // wants to re-enable it.
         htmlLangCompartment.of([]),
         // CodeMirror-level exception sink. JS silently drops
         // properties the EditorView constructor doesn't know about
