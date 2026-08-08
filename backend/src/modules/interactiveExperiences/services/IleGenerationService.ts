@@ -29,7 +29,7 @@ const SYSTEM_PROMPT = `# HARD RULE — your entire response is rendered into a s
 Your reply MUST be EXACTLY ONE complete \`<!DOCTYPE html>...</html>\` document,
 starting with the literal text \`<!DOCTYPE\` and ending with \`</html>\`.
 No prose, no explanation, no preamble, no markdown fences, no narration,
-no \`think...think\` blocks, no \`\`\` fences. Anything before \`<!DOCTYPE\`
+no \`<think>...</think>\` blocks, no \`\`\` fences. Anything before \`<!DOCTYPE\`
 or after \`</html>\` is silently discarded. If you violate this rule the
 teacher sees garbage in their iframe.
 
@@ -1114,9 +1114,17 @@ export class IleGenerationService {
     //       `<!doctype` and discarding everything before it.
     // Looped until no more matches; length cap as a safety net.
     let previous: string;
+    // ponytail: model emissions vary. Cover (a) plain ``...`` blocks
+    // and (b) the Anthropic-specific `<redacted_thinking>...</redacted_thinking>`
+    // blocks that the SDK emits when extended-thinking hits a sensitive
+    // context. Both shapes use the same stripping strategy: anything
+    // inside a tagged block is reasoning, not HTML.
     do {
       previous = trimmed;
-      trimmed = trimmed.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '');
+      trimmed = trimmed.replace(
+        /<think>[\s\S]*?(?:<\/think>|$)|<redacted_thinking>[\s\S]*?(?:<\/redacted_thinking>|$)/gi,
+        '',
+      );
     } while (trimmed !== previous && trimmed.length < 200000);
     // Anchor strip: if `trimmed` has a `<!doctype` somewhere,
     // anything before it is the model's chain-of-thought and
@@ -1129,14 +1137,18 @@ export class IleGenerationService {
     }
     // Strip leading fence on the first delta (cumulative is still empty
     // or contains only whitespace when this kicks in).
-    const leadingFence = cumulative.match(/^(\s*```(?:html)?\s*\n?)/i);
-    if (leadingFence && trimmed.startsWith(leadingFence[1])) {
-      trimmed = trimmed.slice(leadingFence[1].length);
-    } else if (/^\s*```(?:html)?\s*\n?/i.test(cumulative + trimmed)) {
+    // ponytail: the language tag after ``` is model-dependent — html, HTML,
+    // htm, html5, xml, text. Match any tag (or no tag) so the strip doesn't
+    // miss variants the model chose for itself.
+    const FENCE_PREFIX = /^\s*```(?:\w+)?\s*\n?/i;
+    const leadingFence = cumulative.match(FENCE_PREFIX);
+    if (leadingFence && trimmed.startsWith(leadingFence[0])) {
+      trimmed = trimmed.slice(leadingFence[0].length);
+    } else if (FENCE_PREFIX.test(cumulative + trimmed)) {
       // The fence prefix is split across the boundary between
       // cumulative and this delta. Drop just the fence prefix from
       // this delta; the cumulative already had the backticks.
-      const m = (cumulative + trimmed).match(/^\s*```(?:html)?\s*\n?/i);
+      const m = (cumulative + trimmed).match(FENCE_PREFIX);
       if (m) {
         const fenceLen = m[0].length - cumulative.length;
         if (fenceLen > 0 && trimmed.length >= fenceLen) {
@@ -1172,16 +1184,20 @@ export class IleGenerationService {
    */
   private normalizeHtml(raw: string): string {
     let html = raw.trim();
-    // Strip ```html ... ``` fences (defensive)
-    const fence = html.match(/^```(?:html)?\s*([\s\S]*?)\s*```$/i);
+    // Strip ```...``` fences (defensive) — any language tag.
+    const fence = html.match(/^```(?:\w+)?\s*([\s\S]*?)\s*```$/i);
     if (fence) html = fence[1];
-    // Strip leading <think>...</think> reasoning blocks (defensive — the
-    // custom provider emits them inline in delta.content instead of a
-    // separate reasoning channel, so they end up in the stored HTML).
-    html = html.replace(/^<think>[\s\S]*?(?:<\/think>|$)/i, '').trim();
-    // Strip any stray trailing <think> that wasn't closed (model got cut
-    // off mid-reasoning). Anything past the last </html> past that point
-    // is junk.
+    // Strip leading `` / `<redacted_thinking>...</redacted_thinking>`
+    // blocks (defensive — the custom provider emits them inline in
+    // delta.content instead of a separate reasoning channel).
+    html = html
+      .replace(
+        /^<think>[\s\S]*?(?:<\/think>|$)|^<redacted_thinking>[\s\S]*?(?:<\/redacted_thinking>|$)/i,
+        '',
+      )
+      .trim();
+    // Strip anything past the last </html> — the model sometimes emits
+    // trailing reasoning or a stray ``` after the document ends.
     const lastHtmlClose = html.toLowerCase().lastIndexOf('</html>');
     if (lastHtmlClose !== -1) {
       html = html.slice(0, lastHtmlClose + '</html>'.length);
