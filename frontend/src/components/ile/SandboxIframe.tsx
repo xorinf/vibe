@@ -438,7 +438,15 @@ function wrapWithSandbox(
       : 'light';
   const themeMeta = `<meta name="color-scheme" content="light dark">`;
   const stageBg = parentTheme === 'dark' ? 'hsl(230 20% 7%)' : 'hsl(220 16% 95%)';
-  const defaultBodyStyle = `<style>html,body{height:100%;margin:0;background:${stageBg}@media (prefers-color-scheme:dark){html:not(.light){background:hsl(230 20% 7%)}}@media (prefers-color-scheme:light){html:not(.dark){background:hsl(220 16% 95%)}}</style>`;
+  // Match the platform's foreground token so AI-generated HTML without
+  // explicit text colors stays visible. Without the explicit `color`,
+  // the browser default (black) renders every <h1>/<p>/<span> invisible
+  // against the dark stage background. The blank-doc path (see
+  // makeBlankDoc below) already sets this — the AI-wrapped path was
+  // missing it, which is why a "simple hello" ILE rendered as a black
+  // page with no visible text.
+  const stageFg = parentTheme === 'dark' ? 'hsl(220 16% 97%)' : 'hsl(230 25% 12%)';
+  const defaultBodyStyle = `<style>html,body{height:100%;margin:0;background:${stageBg};color:${stageFg}}@media (prefers-color-scheme:dark){html:not(.light){background:hsl(230 20% 7%);color:hsl(220 16% 97%)}}@media (prefers-color-scheme:light){html:not(.dark){background:hsl(220 16% 95%);color:hsl(230 25% 12%)}}</style>`;
 
   // Substitute the placeholder with the real experience id (or '' if
   // not bound yet). The empty string is a safe default because the
