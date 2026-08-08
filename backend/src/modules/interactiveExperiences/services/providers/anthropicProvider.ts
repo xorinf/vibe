@@ -69,6 +69,7 @@ export class AnthropicProvider implements ChatStream {
   constructor(
     private readonly apiKey: string,
     private readonly modelName: string,
+    private readonly baseUrl?: string,
   ) {
     if (!apiKey) {
       throw asProviderError(
@@ -79,7 +80,12 @@ export class AnthropicProvider implements ChatStream {
   }
 
   private client(): Anthropic {
-    return new Anthropic({ apiKey: this.apiKey });
+    // ponytail: baseUrl is optional. When unset, the SDK defaults to
+    // https://api.anthropic.com. MiniMax's Anthropic-compatible endpoint
+    // is passed in via config.baseUrl at construction time.
+    return this.baseUrl
+      ? new Anthropic({apiKey: this.apiKey, baseURL: this.baseUrl})
+      : new Anthropic({apiKey: this.apiKey});
   }
 
   async *stream(req: ChatStreamRequest & { signal?: AbortSignal }): AsyncIterable<StreamChunk> {

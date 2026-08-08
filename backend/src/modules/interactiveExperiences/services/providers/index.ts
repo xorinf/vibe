@@ -21,11 +21,18 @@ export function createProvider(config: IleAiConfig): ChatStream {
   const apiKey = config.apiKey;
   const model = config.model;
 
-  if (provider === 'anthropic') {
-    return new AnthropicProvider(apiKey, model);
+  // anthropic + MiniMax route through the Anthropic SDK. MiniMax's
+  // working endpoint is Anthropic-compatible; default baseUrl points
+  // there. Teachers can override via config.baseUrl.
+  if (provider === 'anthropic' || provider === 'MiniMax') {
+    const baseUrl =
+      config.baseUrl && config.baseUrl.trim().length > 0
+        ? config.baseUrl
+        : PROVIDER_DEFAULTS[provider].baseUrl;
+    return new AnthropicProvider(apiKey, model, baseUrl);
   }
 
-  // OpenAI, MiniMax, OpenRouter, Custom — all OpenAI-compatible chat-completions.
+  // openai, openrouter, custom — OpenAI-compatible chat-completions.
   const baseUrl =
     config.baseUrl && config.baseUrl.trim().length > 0
       ? config.baseUrl
