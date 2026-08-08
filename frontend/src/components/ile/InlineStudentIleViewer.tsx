@@ -17,7 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { SandboxIframe } from './SandboxIframe';
+import { SandboxIframe, type SandboxIframeProps } from './SandboxIframe';
 import { useIleEventReporter } from './useIleEventReporter';
 import { getStudentIlePayload, type StudentIlePayload } from './ileApi';
 import { StudentPlayerChrome } from './StudentPlayerChrome';
@@ -26,6 +26,26 @@ export interface InlineStudentIleViewerProps {
   experienceId: string;
   courseId?: string;
   courseVersionId?: string;
+  /**
+   * Host callback invoked once when the iframe's runtime is
+   * ready. Receives a stable flush function that the parent can
+   * invoke to force the runtime to drain its analytics queue
+   * synchronously — used on navigation away from the ILE so
+   * the last 1-2 seconds of events don't sit in the queue when
+   * the iframe is unmounted.
+   */
+  onFlushReady?: (flush: () => void) => void;
+  /**
+   * Called when the student clicks "Resume Lesson" after
+   * completing the ILE. The ItemContainer wires this to the
+   * course page's `onNext` so the student advances to the
+   * next item in the course tree. The ILE's analytics
+   * events (which include the `complete` event from the
+   * runtime) are already POSTed to the server by the time
+   * this fires — the parent's "Next" navigation is the
+   * correct persistence path for `isCompleted`.
+   */
+  onCompleteAdvance?: () => void;
 }
 
 /**
@@ -38,6 +58,8 @@ export function InlineStudentIleViewer({
   experienceId,
   courseId,
   courseVersionId,
+  onFlushReady,
+  onCompleteAdvance,
 }: InlineStudentIleViewerProps) {
   const [payload, setPayload] = useState<StudentIlePayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -57,7 +79,20 @@ export function InlineStudentIleViewer({
   });
 
   useEffect(() => {
-    if (!experienceId) return;
+    if (!experienceId) {
+      // ponytail: previously the early-return left `loading: true`
+      // forever and StudentPlayerChrome rendered the
+      // "Loading experience…" overlay with no path out. The teacher
+      // adding an ILE item to a section creates an IeItem row with
+      // `details.experienceId = ''` (see ItemBase for INTERACTIVE_EXPERIENCE
+      // in classes/transformers/Item.ts) until the workspace saves the
+      // first experience. Surface a real message so the student
+      // sees "not yet generated" instead of a stuck spinner.
+      setPayload(null);
+      setLoading(false);
+      setError('This experience has not been created yet.');
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
@@ -90,6 +125,7 @@ export function InlineStudentIleViewer({
       showFullscreen
       showCopyLink={false}
       showCoach={false}
+      onCompleteAdvance={onCompleteAdvance}
     >
       <div ref={containerRef} className="absolute inset-0">
         {payload && (
@@ -99,6 +135,7 @@ export function InlineStudentIleViewer({
             remountKey={remountKey}
             onProgress={setProgress}
             emptyMessage="Loading experience…"
+            onFlushReady={onFlushReady}
             onComplete={() => {
               setCompleted(true);
               toast.success('Nice work — you finished the experience!');
@@ -115,7 +152,12 @@ export function InlineStudentIleViewer({
                 },
               );
             }}
-            onAnalytics={reportAnalytics}
+            // Bridge: SandboxIframe's callback accepts the
+            // structurally-identical SandboxAnalyticsEvent, but the
+            // analytics reporter uses its own narrow IleAnalyticsEvent
+            // type. The shapes match so the cast is sound; the
+            // reporter enforces runtime validation at the POST side.
+            onAnalytics={reportAnalytics as unknown as SandboxIframeProps['onAnalytics']}
           />
         )}
         {!loading && !error && payload && (

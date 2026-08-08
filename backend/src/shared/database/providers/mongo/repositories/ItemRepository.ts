@@ -422,11 +422,6 @@ export class ItemRepository implements IItemRepository {
             console.error('Found item has a null or undefined _id:', found);
             throw new InternalServerError('Item has an invalid ID');
           }
-          console.log(
-            await this.feedbackFormCollection.findOne({
-              _id: new ObjectId(found._id),
-            }),
-          );
 
           let item: Item = null;
           switch (found.type) {
@@ -710,6 +705,22 @@ export class ItemRepository implements IItemRepository {
         {
           _id: new ObjectId(itemId),
         },
+        { session },
+      );
+    } else if (
+      itemsGroup.items[itemIndex].type === ItemType.INTERACTIVE_EXPERIENCE
+    ) {
+      // Soft-delete the ILE item row in `interactive_experience_items`.
+      // The corresponding ILE doc in `interactive_experiences` is
+      // intentionally left in place so the teacher can still find
+      // it in their ILE library — its `itemId` field will be stale
+      // (pointing at the now-deleted itemsGroup row) but the doc
+      // itself stays queryable. Cascade-deleting the ILE doc would
+      // surprise teachers who re-use ILEs across sections; the
+      // stale `itemId` is the lesser evil.
+      await this.ileItemCollection.updateOne(
+        { _id: new ObjectId(itemId) },
+        { $set: { isDeleted: true, deletedAt: new Date() } },
         { session },
       );
     } else {

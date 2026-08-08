@@ -25,17 +25,19 @@ export default defineConfig({
   server: {
     proxy: {
       // Proxy API requests to the local backend.
-      // Default: `:3141` is the backend's own port (backend/.example.env
-      // `APP_PORT`). The Functions emulator wraps the backend on `:4001`
-      // per AGENTS.md but the local Firebase config
-      // (backend/firebase.json) only declares the auth emulator —
-      // override with VITE_API_PROXY=http://localhost:4001 when running
-      // the Functions emulator for parity with the documented workflow.
-      // Without this change, fresh dev setups hit ECONNREFUSED on
-      // /api/interactive-experiences/:id/play because the proxy target
-      // is empty.
+      // Default: `:8080` matches the locally-running `node build/index.js`
+      // backend (the build output of `pnpm --filter backend build`).
+      // Other documented setups:
+      //   - `pnpm --filter backend dev` runs on `:3141` (backend/.example.env
+      //     `APP_PORT`) — override with VITE_API_PROXY=http://localhost:3141
+      //   - Firebase Functions emulator wraps the backend on `:4001` (per
+      //     AGENTS.md) — override with VITE_API_PROXY=http://localhost:4001
+      // Without this change, the Vite proxy on its old hardcoded `:4001`
+      // (or the just-shipped `:3141`) hits ECONNREFUSED for the common
+      // local-build workflow, and the student ILE page sees
+      // `loading: true` forever because /play never returns.
       '/api': {
-        target: process.env.VITE_API_PROXY ?? 'http://localhost:3141',
+        target: process.env.VITE_API_PROXY ?? 'http://localhost:8080',
         changeOrigin: true,
         secure: true,
       },
