@@ -132,32 +132,16 @@ export function InlineStudentIleViewer({
           <SandboxIframe
             html={payload.html}
             experienceId={experienceId}
+            // ponytail: match the teacher view (IleInlineView). The
+            // teacher sets injectSdk={false} because the SDK's
+            // document.write() race breaks the AI's inline scripts.
+            // The student loses analytics here but the iframe renders
+            // reliably. End of story — user explicitly asked for the
+            // teacher's setup. Skip the SDK-dependent callbacks.
+            injectSdk={false}
+            allowSameOrigin
             remountKey={remountKey}
-            onProgress={setProgress}
             emptyMessage="Loading experience…"
-            onFlushReady={onFlushReady}
-            onComplete={() => {
-              setCompleted(true);
-              toast.success('Nice work — you finished the experience!');
-            }}
-            onError={() => {
-              toast.error(
-                'The experience hit a small error. Tap Reload to try again.',
-                {
-                  duration: 10_000,
-                  action: {
-                    label: 'Reload',
-                    onClick: handleReload,
-                  },
-                },
-              );
-            }}
-            // Bridge: SandboxIframe's callback accepts the
-            // structurally-identical SandboxAnalyticsEvent, but the
-            // analytics reporter uses its own narrow IleAnalyticsEvent
-            // type. The shapes match so the cast is sound; the
-            // reporter enforces runtime validation at the POST side.
-            onAnalytics={reportAnalytics as unknown as SandboxIframeProps['onAnalytics']}
           />
         )}
         {!loading && !error && payload && (
