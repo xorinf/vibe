@@ -438,7 +438,7 @@ function wrapWithSandbox(
       : 'light';
   const themeMeta = `<meta name="color-scheme" content="light dark">`;
   const stageBg = parentTheme === 'dark' ? 'hsl(230 20% 7%)' : 'hsl(220 16% 95%)';
-  const defaultBodyStyle = `<style>html,body{background:${stageBg}}@media (prefers-color-scheme:dark){html:not(.light){background:hsl(230 20% 7%)}}@media (prefers-color-scheme:light){html:not(.dark){background:hsl(220 16% 95%)}}</style>`;
+  const defaultBodyStyle = `<style>html,body{height:100%;margin:0;background:${stageBg}@media (prefers-color-scheme:dark){html:not(.light){background:hsl(230 20% 7%)}}@media (prefers-color-scheme:light){html:not(.dark){background:hsl(220 16% 95%)}}</style>`;
 
   // Substitute the placeholder with the real experience id (or '' if
   // not bound yet). The empty string is a safe default because the
