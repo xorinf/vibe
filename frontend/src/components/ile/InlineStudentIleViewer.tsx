@@ -132,14 +132,14 @@ export function InlineStudentIleViewer({
           <SandboxIframe
             html={payload.html}
             experienceId={experienceId}
-            // ponytail: match the teacher view (IleInlineView). The
-            // teacher sets injectSdk={false} because the SDK's
-            // document.write() race breaks the AI's inline scripts.
-            // The student loses analytics here but the iframe renders
-            // reliably. End of story — user explicitly asked for the
-            // teacher's setup. Skip the SDK-dependent callbacks.
+            // ponytail: match the teacher view (IleInlineView) exactly.
+            // The teacher sets injectSdk={false} + allowSameOrigin +
+            // className="absolute inset-0". The student renders
+            // identically now. The user explicitly asked for the
+            // teacher's setup. End of story.
             injectSdk={false}
             allowSameOrigin
+            className="absolute inset-0"
             remountKey={remountKey}
             emptyMessage="Loading experience…"
           />
