@@ -225,15 +225,4 @@ export const VIBE_IFRAME_CSP =
   "connect-src 'none'; " +
   "object-src 'none'; " +
   "base-uri 'none'; " +
-  "form-action 'none'; " +
-  // CSP violation reports are POSTed to the platform's reporting
-  // endpoint so a hostile or buggy experience gets logged centrally.
-  // The report-uri is appended to the strict policy; the API base is
-  // derived at runtime from the ILE_API_BASE env (Vite exposes
-  // import.meta.env.VITE_BASE_URL). When the base is empty (local dev
-  // without a proxy), we fall back to a relative path — the browser
-  // resolves it against the iframe's own opaque origin and the report
-  // will 404 silently, which is the right behaviour for a no-CSP-target
-  // local dev.
-  // The placeholder is substituted at runtime by SandboxIframe.
-  "report-uri __VIBE_CSP_REPORT_URI__;";
+  "form-action 'none';";

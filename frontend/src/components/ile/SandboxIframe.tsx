@@ -33,6 +33,17 @@ import {
   VIBE_RUNTIME_SNIPPET,
 } from './vibeSdk';
 
+/**
+ * The analytics event payload we hand the host. Mirrors the shape of
+ * `IleRuntimeEvent` from `ileApi` and `IleAnalyticsEvent` from
+ * `useIleEventReporter` so consumers can keep their narrow types.
+ */
+export interface SandboxAnalyticsEvent {
+  kind: string;
+  clientTs: number;
+  data?: unknown;
+}
+
 export interface SandboxIframeProps {
   /**
    * Raw HTML payload from the AI (or from a saved experience). The iframe
@@ -72,8 +83,24 @@ export interface SandboxIframeProps {
    * Fired on sandboxed-page runtime error (uncaught JS, CSP violation, etc.).
    */
   onError?: (message: string) => void;
+  /**
+   * Optional handle to the iframe's runtime `vibe.flushAnalytics()`.
+   * Called by the host (via the prop function) to force a flush
+   * before the iframe is unmounted — used on "Next" navigation
+   * so events that haven't hit the 2-second auto-flush window
+   * still land on the server.
+   */
+  onFlushReady?: (flush: () => void) => void;
   /** Fired once when the iframe's `vibe:ready` handshake resolves. */
   onLoaded?: () => void;
+  /**
+   * Optional message rendered in the placeholder iframe when the
+   * `html` prop is empty. The default empty-state copy mentions
+   * describing an experience, but a host (e.g. the student player)
+   * can override it to render something more contextual like
+   * "Loading experience…".
+   */
+  emptyMessage?: string;
   /**
    * Fired when the sandboxed runtime flushes a batch of analytics
    * events. The host is responsible for POSTing them to the server.
@@ -81,7 +108,7 @@ export interface SandboxIframeProps {
    */
   onAnalytics?: (
     experienceId: string,
-    events: { kind: string; clientTs: number; data?: unknown }[],
+    events: SandboxAnalyticsEvent[],
   ) => void;
 }
 
@@ -97,11 +124,13 @@ export function SandboxIframe({
   allowSameOrigin = false,
   className,
   experienceId,
+  emptyMessage,
   onProgress,
   onComplete,
   onError,
   onLoaded,
   onAnalytics,
+  onFlushReady,
 }: SandboxIframeProps) {
   const [loaded, setLoaded] = useState(false);
   // The most recent html we successfully pushed into the iframe.
@@ -128,10 +157,14 @@ export function SandboxIframe({
   const srcdoc = useMemo(() => {
     const safe = html ?? '';
     if (!safe.trim()) {
-      return makeBlankDoc('No preview yet — describe what you want on the left.', experienceId);
+      return makeBlankDoc(
+        emptyMessage ??
+          'No preview yet — describe what you want on the left.',
+        experienceId,
+      );
     }
     return wrapWithSandbox(safe, injectSdk, experienceId);
-  }, [html, injectSdk, experienceId]);
+  }, [html, injectSdk, experienceId, emptyMessage]);
 
   // Live update: when `html` changes AFTER the iframe has booted, prefer
   // the runtime's `vibe.setContent` over a srcdoc remount. This keeps
@@ -176,6 +209,27 @@ export function SandboxIframe({
         case IFRAME_MSG_TYPES.READY:
           setLoaded(true);
           onLoaded?.();
+          // Expose a synchronous flush handle for the host's
+          // teardown. The runtime snippet (vibeSdk.ts) defines
+          // `vibe.flushAnalytics()` which calls `flush()` here,
+          // which posts the current batch of events and clears
+          // the queue. The host invokes this from its
+          // `stopCurrentItem` (e.g. when the student clicks
+          // "Next") so the last 1-2 seconds of interaction events
+          // don't sit in the queue when the iframe is unmounted.
+          if (onFlushReady) {
+            const win = iframeRef.current?.contentWindow as
+              | (Window & { vibe?: { flushAnalytics?: () => void } })
+              | null;
+            const flush = () => {
+              try {
+                win?.vibe?.flushAnalytics?.();
+              } catch {
+                // Iframe may already be unmounted; best-effort.
+              }
+            };
+            onFlushReady(flush);
+          }
           break;
         case IFRAME_MSG_TYPES.PROGRESS:
           onProgress?.(Number(data.payload?.percent ?? 0));
@@ -274,16 +328,10 @@ function wrapWithSandbox(
 
   // Inject CSP + (optionally) the runtime SDK by rewriting the <head>.
   // If the document doesn't have one, add it.
-  //
-  // The CSP contains a `__VIBE_CSP_REPORT_URI__` placeholder that we
-  // substitute here so the runtime knows where to POST violation
-  // reports. We default to `/api/interactive-experiences/csp-report`
-  // (relative to the parent's origin); deployment can override by
-  // setting `VITE_ILE_CSP_REPORT_URI` at build time.
-  const cspReportUri =
-    (import.meta.env.VITE_ILE_CSP_REPORT_URI as string | undefined) ??
-    '/api/interactive-experiences/csp-report';
-  const cspPolicy = VIBE_IFRAME_CSP.replace('__VIBE_CSP_REPORT_URI__', cspReportUri);
+  // The CSP no longer carries a report-uri placeholder — that
+  // directive is ignored in <meta> tags per the CSP spec, and the
+  // browser used to spam the console warning on every iframe load.
+  const cspPolicy = VIBE_IFRAME_CSP;
   const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${cspPolicy}">`;
 
   // Match the parent page's theme so an AI-generated HTML without an
@@ -339,16 +387,11 @@ function wrapWithSandbox(
 }
 
 function makeBlankDoc(message: string, experienceId?: string) {
-  // Mirror the CSP report-uri substitution used in the main path so
-  // the blank-state iframe also reports violations to the right URL.
   // Match the parent page's theme so the "no content yet" empty
   // state doesn't blast bright white when the teacher is in dark
   // mode. The parent sets `<html class="dark">` or `class="light"`
   // from its theme toggle; we mirror that on the iframe.
-  const cspReportUri =
-    (import.meta.env.VITE_ILE_CSP_REPORT_URI as string | undefined) ??
-    '/api/interactive-experiences/csp-report';
-  const cspPolicy = VIBE_IFRAME_CSP.replace('__VIBE_CSP_REPORT_URI__', cspReportUri);
+  const cspPolicy = VIBE_IFRAME_CSP;
   const parentTheme =
     typeof document !== 'undefined'
       ? document.documentElement.classList.contains('dark')

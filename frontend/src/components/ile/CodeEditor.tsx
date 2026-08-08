@@ -13,9 +13,23 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react';
 import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view';
+
+/**
+ * Tagged `userEvent` for transactions the ILE wrapper dispatches
+ * itself (the live-stream sync effect and the AI's accept/reject).
+ * The `updateListener` checks for this tag so it can skip the
+ * `onChange` re-emit — without the tag, every programmatic
+ * dispatch would round-trip to the parent as a "user edit" and
+ * freeze `manualHtml` at the first streaming delta (the rest of
+ * the stream would then never reach the editor).
+ */
+const ILE_PROGRAMMATIC_USER_EVENT = 'ile.programmatic';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { bracketMatching, foldGutter, indentOnInput, syntaxHighlighting, defaultHighlightStyle, HighlightStyle } from '@codemirror/language';
-import { html } from '@codemirror/lang-html';
+import { bracketMatching, foldGutter, indentOnInput, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
+// ponytail: html() extension is disabled by default to avoid the
+// @lezer/html parser-throw on partial streaming input. The import is
+// kept via this comment in case a future change wants to re-enable it.
+// import { html } from '@codemirror/lang-html';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
@@ -236,6 +250,13 @@ export function CodeEditor({
   // Track the value we last set into the editor so onChange doesn't
   // bounce-set the same value back.
   const lastSetRef = useRef<string>(value);
+  // The exceptionSink re-dispatches the doc to recover from the
+  // rollback that happens before the sink fires. The re-dispatch
+  // needs the CURRENT value, not the value at mount time — the
+  // stream might have advanced by the time the sink fires. The
+  // value-sync effect writes the latest value here on every render,
+  // and the sink reads it when it has to re-dispatch.
+  const liveValueRef = useRef<string>(value);
   // Compartment re-creates per configuration change without rebuilding
   // the entire editor state.
   const wrapCompartment = useMemo(() => new Compartment(), []);
@@ -258,7 +279,29 @@ export function CodeEditor({
     const updateListener = EditorView.updateListener.of((v) => {
       if (v.docChanged) {
         const next = v.state.doc.toString();
-        lastSetRef.current = next;
+        // Belt-and-suspenders alongside the userEvent-tag check.
+        // If the new doc equals the value we just set programmatically
+        // (via the value-prop sync effect or the imperative setValue
+        // handle), no real user edit happened — skip onChange
+        // unconditionally. This is more robust than the
+        // `every(userEvent)` check because CM batches extension
+        // transactions (autocompletion, search, highlight, state-
+        // field updates from @lezer/html) into the same update tick
+        // and ANY non-tagged transaction would defeat the userEvent
+        // filter. The identity check is the canonical guard.
+        //
+        // CRITICAL: do NOT assign `lastSetRef.current` here. The
+        // listener should only READ lastSetRef (set by the dispatch
+        // sites); writing here would mask real user edits.
+        if (next === lastSetRef.current) return;
+        // Secondary filter: every transaction tagged as our own
+        // programmatic write. Catches edge cases where the new doc
+        // doesn't equal lastSetRef (e.g. an extension mutated it)
+        // AND the only transactions in the update are ours.
+        const onlyProgrammatic = v.transactions.every((t) =>
+          t.isUserEvent(ILE_PROGRAMMATIC_USER_EVENT),
+        );
+        if (onlyProgrammatic) return;
         onChange?.(next);
       }
     });
@@ -278,19 +321,27 @@ export function CodeEditor({
     // functional editor with all the platform theme tokens applied,
     // they just lose colorized syntax tokens — a fair trade vs the
     // textarea fallback.
-    let useHtmlParser = true;
-    try {
-      // The `html()` extension exposes a `languageData` field that
-      // contains a parser reference. Triggering `startParse` on a
-      // tiny doc is enough to surface the crash on first paint if
-      // the parser is broken on this content. We do the probe
-      // synchronously, just once, and bail on any throw.
-      const probe = EditorState.create({ doc: '<' });
-      const lang = (html() as unknown as { languageData?: { parser?: { startParse?: (s: EditorState) => unknown } } });
-      lang?.languageData?.parser?.startParse?.(probe);
-    } catch {
-      useHtmlParser = false;
-    }
+    // Runtime parser guard. The @lezer/html parser is an
+    // incremental LR parser that throws inside its tree balancer
+    // when given a partial / invalid document — `undefined is not
+    // an object (evaluating 'children.length')` shows up at the
+    // 29k-char threshold on AI streams that emit `` thinking
+    // blocks inline, style tags with unescaped chars, or anything
+    // else the grammar doesn't like. A static mount-time probe
+    // doesn't catch this because the parser doesn't throw on init
+    // — it throws on every incremental reparse while the stream
+    // is going. We register an `exceptionSink` that swaps the
+    // `html()` extension out of its compartment the first time the
+    // library catches an exception. The teacher keeps a fully
+    // functional editor with all the other extensions — they just
+    // lose syntax highlighting for the rest of the session, which
+    // is the same trade the probe was making.
+    // Runtime parser guard — see the catch handler below. `exceptionSink`
+    // is a CodeMirror Facet, so we register it through `extensions`,
+    // not as a property of the `EditorView({})` config (which JS
+    // silently ignores and which TS rightly flagged).
+    let htmlParserDisabled = false;
+    const htmlLangCompartment = new Compartment();
 
     const state = EditorState.create({
       doc: value,
@@ -315,8 +366,72 @@ export function CodeEditor({
           indentWithTab,
         ]),
         // HTML syntax highlighting (tags/attrs/strings/comments).
-        // Skipped if the @lezer/html parser throws on probe.
-        useHtmlParser ? html() : [],
+        // Wrapped in a compartment so we can swap it out mid-session
+        // if the parser starts throwing on the streaming input.
+        //
+        // ponytail: start with the html() extension REMOVED. The
+        // exceptionSink re-enables it only when the parser proves
+        // safe on a small probe. The @lezer/html parser throws
+        // `undefined is not an object (evaluating 'this._tree_
+        // .children.length')` on partial streaming input — the
+        // throw propagates to the React error boundary, which
+        // collapses the editor to a plain <textarea> and loses
+        // the dark-mode theme + line numbers + history. The
+        // exceptionSink DOES fire on the dispatcher path, but
+        // the parser throws BEFORE the sink in some cases (the
+        // sink can't catch what the parser already threw). The
+        // robust fix: don't enable the parser at all by default;
+        // the ILE streaming edits are read-only while they're
+        // happening, so the teacher never sees syntax highlighting
+        // go on during a stream anyway. The compartment is left
+        // here so a future "post-stream syntax highlight" toggle
+        // can reconfigure it without a remount.
+        htmlLangCompartment.of([]),
+        // CodeMirror-level exception sink. JS silently drops
+        // properties the EditorView constructor doesn't know about
+        // — we have to register the sink via this Facet or the
+        // parser-throw fallback never fires.
+        EditorView.exceptionSink.of((exception: unknown) => {
+          if (!htmlParserDisabled) {
+            // First throw: swap the html() extension out of its
+            // compartment so the next dispatches don't re-throw.
+            // The dispatch's *changes* were already rolled back
+            // by CM before the sink fires — without the re-dispatch
+            // below, the doc stays at the OLD value (often empty)
+            // and the editor appears blank even though React
+            // state has 11k+ chars. The fix is to re-dispatch the
+            // doc with the current view.value AFTER the rebuild
+            // so the doc catches up to what React intended.
+            htmlParserDisabled = true;
+            try {
+              view.dispatch({
+                effects: htmlLangCompartment.reconfigure([]),
+                userEvent: ILE_PROGRAMMATIC_USER_EVENT,
+              });
+            } catch {
+              /* view torn down */
+            }
+          }
+          // The dispatch's changes were rolled back by CM before
+          // the sink fires. Re-dispatch the live target value as
+          // a plain-text replacement so the doc catches up to
+          // React state. The compartment swap above already
+          // removed the html() extension, so this re-dispatch
+          // should not throw.
+          try {
+            view.dispatch({
+              changes: { from: 0, to: view.state.doc.length, insert: liveValueRef.current ?? '' },
+              userEvent: ILE_PROGRAMMATIC_USER_EVENT,
+            });
+          } catch {
+            /* view torn down mid-stream */
+          }
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[CodeEditor] @lezer/html parser threw; disabling HTML syntax highlighting for this session.',
+            exception,
+          );
+        }),
         autocompletion(),
         // Word-wrap is a compartment so toggling it doesn't reset the
         // document. We seed the initial value to whatever the parent
@@ -331,6 +446,25 @@ export function CodeEditor({
     const view = new EditorView({
       state,
       parent: hostRef.current,
+      // Catch any exception thrown by the @lezer/html parser during
+      // an incremental reparse — the parser can throw inside its
+      // tree balancer when given partial / malformed streaming
+      // input, and the throw is otherwise uncatchable (it would
+      // propagate to the React error boundary and replace the
+      // editor with a plain `<textarea>`). When we catch one, we
+      // swap the `html()` extension out of its compartment so the
+      // parser is gone for the rest of the session — the editor
+      // keeps every other extension (line numbers, theme, history,
+      // search, autocompletion) and just loses syntax highlighting.
+      // The swap is idempotent — once disabled it stays disabled.
+      //
+      // `exceptionSink` is a CM Facet, NOT a direct config option —
+      // pass it via `extensions` instead of as a property of the
+      // `EditorView({})` arg. The previous code passed it as a
+      // property, which TypeScript flagged but JavaScript silently
+      // dropped — the parser-throw fallback then NEVER fired and
+      // the React error boundary took over, dropping the editor
+      // down to the textarea fallback.
     });
     viewRef.current = view;
     lastSetRef.current = value;
@@ -371,14 +505,72 @@ export function CodeEditor({
 
   // Sync `value` → editor content. Use a transaction so the change
   // doesn't trigger a re-emit through onChange.
+  //
+  // We tag the dispatch with `userEvent: 'ile.programmatic'` so
+  // the updateListener can distinguish our own writes from a user
+  // typing in the editor and skip the onChange call. Without the
+  // tag, the listener would round-trip every dispatch back to
+  // the parent as a "user edit", which would set `manualHtml` to
+  // the current stream html and freeze the editor at that snapshot
+  // (the next stream delta would never reach the editor because
+  // `effectiveHtml` resolves to `manualHtml` first).
+  //
+  // Performance: streaming HTML into a CodeMirror doc by replacing
+  // the whole content on every delta is O(n²)-ish — every dispatch
+  // re-parses the entire accumulated doc through `@lezer/html`.
+  // For a 39k-char stream with ~1700 deltas that's ~67M parser
+  // operations. To keep this fast, we do an incremental INSERT
+  // whenever the new `value` is a strict extension of the
+  // current doc content. Falls back to the full replace only on
+  // the first delta or when the docs diverge (e.g. the user typed
+  // something and the model's snapshot doesn't match).
   useEffect(() => {
     const view = viewRef.current;
+    // Keep the sink's recovery buffer in sync with the latest value
+    // so the exceptionSink can re-dispatch the current target after
+    // a parser-throw rollback.
+    liveValueRef.current = value;
     if (!view) return;
     if (value === undefined || value === lastSetRef.current) return;
-    lastSetRef.current = value ?? '';
-    view.dispatch({
-      changes: { from: 0, to: view.state.doc.length, insert: value ?? '' },
-    });
+    const prev = view.state.doc.toString();
+    try {
+      if (prev.length > 0 && value.startsWith(prev)) {
+        // Incremental append — insert the new tail only.
+        const tail = value.slice(prev.length);
+        view.dispatch({
+          changes: { from: prev.length, insert: tail },
+          userEvent: ILE_PROGRAMMATIC_USER_EVENT,
+        });
+      } else {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: value ?? '' },
+          userEvent: ILE_PROGRAMMATIC_USER_EVENT,
+        });
+      }
+      // Only stamp lastSetRef AFTER the dispatch lands. If the
+      // dispatch rolls back (e.g. @lezer/html throws inside the
+      // reparse, which the exceptionSink Facet handles separately),
+      // the doc is unchanged and lastSetRef must stay equal to
+      // the doc content, not the attempted value — otherwise the
+      // sync effect's identity check at the top would skip the
+      // NEXT delta (the bug the previous fix already addressed).
+      lastSetRef.current = value;
+    } catch (err) {
+      // The dispatch can throw for two distinct reasons:
+      //   (a) the view is being torn down — nothing to do, the
+      //       next mount will rebuild the editor from the parent's
+      //       value.
+      //   (b) the @lezer/html parser threw on the streamed input
+      //       — the editor's exceptionSink re-dispatches the doc
+      //       to recover the rollback, so the doc is now in sync
+      //       with the value we just tried. Mark lastSetRef as
+      //       updated so the NEXT value's effect doesn't get
+      //       confused by a stale compare flag.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!/destroy|destroyed|removed/i.test(msg)) {
+        lastSetRef.current = value;
+      }
+    }
   }, [value]);
 
   // Sync `wordWrap` → compartment.
@@ -411,10 +603,33 @@ export function CodeEditor({
         const view = viewRef.current;
         if (!view) return;
         if (next === lastSetRef.current) return;
-        lastSetRef.current = next;
-        view.dispatch({
-          changes: { from: 0, to: view.state.doc.length, insert: next },
-        });
+        // Incremental append when the new value extends the current
+        // doc — much cheaper than a full replace for large streaming
+        // payloads. Falls back to replace when the docs diverge.
+        const prev = view.state.doc.toString();
+        try {
+          if (prev.length > 0 && next.startsWith(prev)) {
+            view.dispatch({
+              changes: { from: prev.length, insert: next.slice(prev.length) },
+              userEvent: ILE_PROGRAMMATIC_USER_EVENT,
+            });
+          } else {
+            view.dispatch({
+              changes: { from: 0, to: view.state.doc.length, insert: next },
+              userEvent: ILE_PROGRAMMATIC_USER_EVENT,
+            });
+          }
+          // Only stamp lastSetRef AFTER the dispatch lands. If
+          // the dispatch rolls back (e.g. @lezer/html throws
+          // inside the reparse, which the exceptionSink Facet
+          // handles separately), the doc is unchanged and
+          // lastSetRef must stay equal to the doc content, not
+          // the attempted value.
+          lastSetRef.current = next;
+        } catch {
+          // The dispatch itself can throw if the view is being
+          // torn down. Don't update lastSetRef in that case.
+        }
       },
       focus: () => {
         viewRef.current?.focus();
@@ -428,6 +643,7 @@ export function CodeEditor({
         lastSetRef.current = formatted;
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: formatted },
+          userEvent: ILE_PROGRAMMATIC_USER_EVENT,
         });
       },
       openSearch: () => {
