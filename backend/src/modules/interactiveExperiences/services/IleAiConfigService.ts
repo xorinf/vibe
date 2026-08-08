@@ -14,7 +14,8 @@ import {
 } from './providers/index.js';
 import {
   ProviderAuthError,
-  ProviderNetworkError,
+  ProviderError,
+  providerErrorToTestConnectionStatus,
 } from './providers/types.js';
 
 const KEY_MASK_PREVIEW_CHARS = 4;
@@ -173,19 +174,29 @@ export class IleAiConfigService {
         }
       }
       return { ok: true, status: 'connected', modelEcho: model };
-    } catch (err: any) {
-      if (err instanceof ProviderAuthError) {
-        return { ok: false, status: 'invalid_key', message: err.message };
+    } catch (err: unknown) {
+      // ponytail: use the closed-kind taxonomy on ProviderError instead of
+      // the deprecated ProviderAuthError alias. `ProviderAuthError extends
+      // ProviderAuthenticationError` but the SDK throws the parent class
+      // (or anything ProviderError-shaped), so the instanceof check was
+      // missing the common case and falling through to network_error with
+      // the raw MiniMax JSON as the message.
+      if (err instanceof ProviderError) {
+        const {status, message} = providerErrorToTestConnectionStatus(err);
+        return {ok: false, status, message};
       }
-      if (err instanceof ProviderNetworkError) {
-        return { ok: false, status: 'network_error', message: err.message };
+      if (err instanceof ProviderAuthError) {
+        // Legacy compat: kept so existing call sites don't silently
+        // downgrade to network_error when a ProviderAuthError does slip
+        // through. The class itself is @deprecated upstream.
+        return {ok: false, status: 'invalid_key', message: err.message};
       }
       // Map unknown errors defensively — status code sniffing is the fallback.
-      const status = err?.status ?? err?.response?.status;
+      const status = (err as any)?.status ?? (err as any)?.response?.status;
       if (status === 401 || status === 403) {
-        return { ok: false, status: 'invalid_key', message: err?.message };
+        return { ok: false, status: 'invalid_key', message: (err as any)?.message };
       }
-      return { ok: false, status: 'network_error', message: err?.message ?? 'Unknown error' };
+      return { ok: false, status: 'network_error', message: (err as any)?.message ?? 'Unknown error' };
     }
   }
 
