@@ -285,8 +285,11 @@ function useAiConfigState(
       baseUrl: baseUrl.trim() || undefined,
     };
     // Only send the apiKey if the user typed one. Empty string means
-    // "keep the previously stored key" — handled server-side.
-    if (apiKey.length > 0) payload.apiKey = apiKey;
+    // "keep the previously stored key" — handled server-side. Trim
+    // defensively so a trailing newline from copy-paste (very common
+    // when grabbing a key from terminal / .env file / console) doesn't
+    // make MiniMax parse the key as malformed.
+    if (apiKey.trim().length > 0) payload.apiKey = apiKey.trim();
 
     (async () => {
       try {
@@ -319,7 +322,11 @@ function useAiConfigState(
     input.provider = provider;
     input.model = model.trim();
     if (baseUrl.trim()) input.baseUrl = baseUrl.trim();
-    if (apiKey.length > 0) input.apiKey = apiKey;
+    // ponytail: trim the key so a copy-pasted trailing newline (common
+    // when grabbing the key from a terminal / console) doesn't make the
+    // upstream auth layer parse it as malformed. Mirrors the pattern
+    // used for every other user-input field in this panel.
+    if (apiKey.trim().length > 0) input.apiKey = apiKey.trim();
 
     (async () => {
       try {
