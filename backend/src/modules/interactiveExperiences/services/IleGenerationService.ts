@@ -264,7 +264,14 @@ export class IleGenerationService {
       for await (const chunk of stream) {
         if (abort.signal.aborted) break;
         if (chunk.kind === 'text') {
-          const cleanDelta = this.sanitizeDeltaForHtml(html, chunk.delta);
+          const { cleanDelta, cumulativeToDrop } =
+            this.sanitizeDeltaForHtml(html, chunk.delta);
+          if (cumulativeToDrop > 0) {
+            // ponytail: the sanitizer found <!doctype inside the
+            // existing accumulated prose. Drop the prose prefix
+            // from the accumulator — it was reasoning, not HTML.
+            html = html.slice(cumulativeToDrop);
+          }
           if (cleanDelta) {
             html += cleanDelta;
             chunkCount++;
@@ -581,7 +588,14 @@ export class IleGenerationService {
       for await (const chunk of stream) {
         if (abort.signal.aborted) break;
         if (chunk.kind === 'text') {
-          const cleanDelta = this.sanitizeDeltaForHtml(html, chunk.delta);
+          const { cleanDelta, cumulativeToDrop } =
+            this.sanitizeDeltaForHtml(html, chunk.delta);
+          if (cumulativeToDrop > 0) {
+            // ponytail: the sanitizer found <!doctype inside the
+            // existing accumulated prose. Drop the prose prefix
+            // from the accumulator — it was reasoning, not HTML.
+            html = html.slice(cumulativeToDrop);
+          }
           if (cleanDelta) {
             html += cleanDelta;
             chunkCount++;
@@ -812,7 +826,14 @@ export class IleGenerationService {
       for await (const chunk of stream) {
         if (abort.signal.aborted) break;
         if (chunk.kind === 'text') {
-          const cleanDelta = this.sanitizeDeltaForHtml(html, chunk.delta);
+          const { cleanDelta, cumulativeToDrop } =
+            this.sanitizeDeltaForHtml(html, chunk.delta);
+          if (cumulativeToDrop > 0) {
+            // ponytail: the sanitizer found <!doctype inside the
+            // existing accumulated prose. Drop the prose prefix
+            // from the accumulator — it was reasoning, not HTML.
+            html = html.slice(cumulativeToDrop);
+          }
           if (cleanDelta) {
             html += cleanDelta;
             chunkCount++;
@@ -1097,19 +1118,22 @@ export class IleGenerationService {
    * fence emits an empty string. The interim deltas pass through
    * verbatim.
    */
-  private sanitizeDeltaForHtml(cumulative: string, delta: string): string {
-    if (!delta) return delta;
+  // ponytail: returns the cleaned delta. When the function detects
+  // an `<!doctype` anchor inside the cumulative prose, it also
+  // returns the slice of `cumulative` that should be discarded
+  // (so the caller can drop the reasoning prefix from its
+  // accumulator). Empty string when the slice is entirely inside
+  // cumulative.
+  private sanitizeDeltaForHtml(
+    cumulative: string,
+    delta: string,
+  ): { cleanDelta: string; cumulativeToDrop: number } {
+    if (!delta) return { cleanDelta: delta, cumulativeToDrop: 0 };
     let trimmed = delta;
-    // Strip `think` reasoning blocks. Providers like MiniMax
-    // emit reasoning inline in delta.content rather than via a
-    // separate SSE event; the `<` `>` chars inside crash the
-    // CodeMirror @lezer/html parser. Strip them before the
-    // editor ever sees them. Looped so consecutive blocks all
-    // come out, with a length cap as a safety net against a
-    // runaway model.
+    let cumulativeToDrop = 0;
     // Strip `think` reasoning blocks. The MiniMax (and similar)
     // providers emit the model's chain-of-thought inline in
-    // `delta.content` rather than via a separate SSE event. Two
+    // `delta.content` rather than via a separate SSE event. Three
     // variants we have to handle:
     //   (a) Full `<think>...</think>` block (Anthropic-style)
     //   (b) Unclosed `<think>...EOF` (model cut off mid-think)
@@ -1132,14 +1156,38 @@ export class IleGenerationService {
         '',
       );
     } while (trimmed !== previous && trimmed.length < 200000);
-    // Anchor strip: if `trimmed` has a `<!doctype` somewhere,
-    // anything before it is the model's chain-of-thought and
-    // should be discarded (handles the (c) case above). The
-    // rstrip removes trailing whitespace so the doc starts
-    // cleanly on the HTML opener.
-    const dt = /<!doctype/i.exec(trimmed);
-    if (dt && dt.index > 0) {
-      trimmed = trimmed.slice(dt.index);
+    // ponytail: anchor strip on the COMBINED `cumulative + trimmed`
+    // view, not just `trimmed`. Models emit reasoning as plain prose
+    // across many small deltas — none of which individually contain
+    // `<!doctype`. The previous strip on `trimmed` alone left the
+    // accumulated prose in `cumulative`, leaking reasoning into the
+    // editor. We anchor on the combined view and slice from
+    // `<!doctype` onward; the caller is told how many leading chars
+    // of `cumulative` to drop via `cumulativeToDrop`.
+    const combinedDt = /<!doctype/i.exec(cumulative + trimmed);
+    if (combinedDt && combinedDt.index > 0) {
+      const anchorIndex = combinedDt.index;
+      if (anchorIndex < cumulative.length) {
+        // Anchor is INSIDE cumulative — caller drops the prefix
+        // of cumulative. The delta is entirely pre-anchor
+        // reasoning; reset it to empty.
+        cumulativeToDrop = anchorIndex;
+        trimmed = '';
+      } else if (anchorIndex === cumulative.length) {
+        // Anchor is exactly at the boundary. The cumulative is
+        // entirely reasoning; the delta starts with the
+        // document opener. Caller drops the entire cumulative;
+        // the delta is kept as-is.
+        cumulativeToDrop = cumulative.length;
+      } else {
+        // Anchor is past the boundary. The cumulative is
+        // entirely reasoning; the delta starts with reasoning
+        // then transitions to HTML at the anchor. Caller drops
+        // the entire cumulative; we slice the delta from the
+        // anchor position.
+        cumulativeToDrop = cumulative.length;
+        trimmed = trimmed.slice(anchorIndex - cumulative.length);
+      }
     }
     // Strip leading fence on the first delta (cumulative is still empty
     // or contains only whitespace when this kicks in).
@@ -1180,7 +1228,7 @@ export class IleGenerationService {
         trimmed = trimmed.slice(0, trimmed.length - (combined.length - tailStart));
       }
     }
-    return trimmed;
+    return { cleanDelta: trimmed, cumulativeToDrop };
   }
 
   /**

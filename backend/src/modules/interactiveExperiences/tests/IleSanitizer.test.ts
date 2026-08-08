@@ -21,7 +21,11 @@ class TestableGen extends IleGenerationService {
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sanitize(cumulative: string, delta: string): string {
-    return (this as any).sanitizeDeltaForHtml(cumulative, delta);
+    const out = (this as any).sanitizeDeltaForHtml(cumulative, delta) as {
+      cleanDelta: string;
+      cumulativeToDrop: number;
+    };
+    return out.cleanDelta;
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   normalize(raw: string): string {
@@ -100,6 +104,45 @@ describe('ILE sanitizer + normalizeHtml', () => {
         'Let me think about this design>\n<!DOCTYPE html><html></html>',
       );
       expect(out).toBe('<!DOCTYPE html><html></html>');
+    });
+  });
+
+  describe('cumulative-drop', () => {
+    it('drops accumulated reasoning prose when <!doctype lands inside an earlier delta', () => {
+      // ponytail: models emit chain-of-thought as plain prose
+      // across many small deltas. None of those deltas contain
+      // <!doctype on their own — the anchor only appears later.
+      // The sanitizer must tell the caller to discard the prose
+      // prefix from the cumulative accumulator. We test the
+      // shape of the return value directly (not just cleanDelta).
+      const result = (gen as any).sanitizeDeltaForHtml(
+        'Operating System caching concepts...\nLet me think...\n',
+        '<!DOCTYPE html><html></html>',
+      ) as { cleanDelta: string; cumulativeToDrop: number };
+      expect(result.cleanDelta).toBe('<!DOCTYPE html><html></html>');
+      // The anchor is at index N of cumulative + trimmed. Since
+      // the anchor is at position 0 of the delta, it lands at
+      // cumulative.length in the combined view. cumulativeToDrop
+      // should equal cumulative.length so the caller slices the
+      // entire cumulative off.
+      expect(result.cumulativeToDrop).toBe(
+        'Operating System caching concepts...\nLet me think...\n'.length,
+      );
+    });
+
+    it('drops prose AND keeps partial delta after <!doctype anchor', () => {
+      // Realistic: model emits the doc opener mid-delta, with
+      // reasoning prose on the same line. The anchor strip
+      // should slice from <!doctype onward, keeping the partial
+      // HTML, and signal "drop all the cumulative prose".
+      const prose = 'Let me design this:\n';
+      const delta = 'header text<!DOCTYPE html><html></html>';
+      const result = (gen as any).sanitizeDeltaForHtml(
+        prose,
+        delta,
+      ) as { cleanDelta: string; cumulativeToDrop: number };
+      expect(result.cleanDelta).toBe('<!DOCTYPE html><html></html>');
+      expect(result.cumulativeToDrop).toBe(prose.length);
     });
   });
 
