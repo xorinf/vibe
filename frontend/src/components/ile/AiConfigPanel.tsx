@@ -259,12 +259,24 @@ function useAiConfigState(
     return PROVIDER_DEFAULTS[provider];
   }, [provider]);
 
-  // Initialize fields on first selection if empty.
+  // When the teacher switches providers, overwrite the model +
+  // baseUrl with the new provider's defaults. Without this, a teacher
+  // who previously saved `provider='custom'` + `baseUrl='/v1'` (an
+  // OpenAI-compat URL), then picks `MiniMax` from the dropdown, ends
+  // up with MiniMax routing through the OpenAI-compat URL — which
+  // silently breaks every subsequent request.
+  //
+  // The audit recommended this; the trade-off is a teacher who
+  // manually overrode baseUrl for a non-custom provider (e.g. they
+  // route through a proxy) loses their override on provider switch.
+  // Acceptable because (a) the typical workflow is pick provider +
+  // hit Save, no manual baseUrl editing for non-custom; (b) `custom`
+  // is explicitly preserved below so proxy workflows still work.
   useEffect(() => {
     if (provider === 'custom') return;
     if (!defaultsForProvider) return;
-    if (!model) setModel(defaultsForProvider.defaultModel);
-    if (!baseUrl) setBaseUrl(defaultsForProvider.defaultBaseUrl);
+    setModel(defaultsForProvider.defaultModel);
+    setBaseUrl(defaultsForProvider.defaultBaseUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
 
