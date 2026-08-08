@@ -163,7 +163,9 @@ export function SandboxIframe({
         experienceId,
       );
     }
-    return wrapWithSandbox(safe, injectSdk, experienceId);
+    return scrubReportUriFromContent(
+      wrapWithSandbox(safe, injectSdk, experienceId),
+    );
   }, [html, injectSdk, experienceId, emptyMessage]);
 
   // Live update: when `html` changes AFTER the iframe has booted, prefer
@@ -388,6 +390,28 @@ function wrapWithSandbox(
   return body;
 }
 
+
+// ponytail: defensive. The AI-generated HTML may include its own
+// <meta http-equiv="Content-Security-Policy"> tag with a `report-uri`
+// directive. CSP's `report-uri` is ignored in <meta> tags per the
+// spec, and the browser emits a console warning every time it
+// parses one. Strip both `report-uri` AND the CSP3 `report-to`
+// from any meta CSP tag in the iframe content so the warning cannot
+// fire from any source — neither our injected wrapper nor any
+// meta CSP the AI may emit inline.
+function scrubReportUriFromContent(html: string): string {
+  return html.replace(
+    /<meta\s+http-equiv=["']Content-Security-Policy["']\s+content=["']([^"']*)["']\s*\/?>/gi,
+    (_match, content) => {
+      const sanitized = content
+        .replace(/;\s*report-uri[^;]*/gi, '')
+        .replace(/;\s*report-to[^;]*/gi, '')
+        .trim();
+      return `<meta http-equiv="Content-Security-Policy" content="${sanitized}">`;
+    },
+  );
+}
+
 function makeBlankDoc(message: string, experienceId?: string) {
   // Match the parent page's theme so the "no content yet" empty
   // state doesn't blast bright white when the teacher is in dark
@@ -406,7 +430,7 @@ function makeBlankDoc(message: string, experienceId?: string) {
     html, body { background: ${parentTheme === 'dark' ? 'hsl(230 20% 7%)' : 'hsl(220 16% 95%)'}; color: ${parentTheme === 'dark' ? 'hsl(220 16% 97%)' : 'hsl(230 25% 12%)'}; }
     .empty { display: flex; align-items: center; justify-content: center; height: 100%; font-size: 14px; }
   </style>`;
-  return `<!DOCTYPE html>
+  return scrubReportUriFromContent(`<!DOCTYPE html>
 <html class="${parentTheme}">
 <head>
 <meta charset="utf-8">
@@ -418,7 +442,7 @@ ${VIBE_RUNTIME_SNIPPET.replace('__VIBE_EXPERIENCE_ID_PLACEHOLDER__', experienceI
 <body>
 <div class="empty">${escapeHtml(message)}</div>
 </body>
-</html>`;
+</html>`);
 }
 
 function escapeHtml(s: string): string {
