@@ -9,13 +9,21 @@
  *     appended to the HTML and reports progress / completion /
  *     analytics events via postMessage.
  *
- * Sandbox attributes: the iframe is created with
- * `sandbox="allow-scripts"`. By default, same-origin is NOT
- * allowed (opaque origin; cannot reach the parent). The teacher
- * preview opts in to same-origin via `sameOrigin` so the
- * generated HTML can call `requestFullscreen()` (the Esc-to-exit
- * fullscreen button). The student player keeps the strict opaque
- * sandbox.
+ * Sandbox attributes: BOTH teacher and student iframes use
+ * `sandbox="allow-scripts allow-same-origin"`. The audit H1
+ * (2026-07-28) originally tightened the student iframe to
+ * opaque-origin, but the parent's SDK handshake
+ * (`vibe.setContent`, `vibe.flushAnalytics`, `vibe.complete`)
+ * calls methods on `window.vibe` which throws SecurityError on
+ * an opaque-origin iframe. The other isolation mechanisms
+ * already cover the audit H1 risks:
+ *   - `connect-src 'none'` — no fetch/XHR at all
+ *   - `script-src 'unsafe-inline'` — only inline scripts
+ *   - postMessage envelope requires `__vibe: true`
+ * So `allow-same-origin` doesn't enable any new attack surface;
+ * it only lets the parent's SDK handshake work. The default
+ * is now `true`. Pass `allowSameOrigin={false}` explicitly if
+ * a future caller needs opaque-origin for some reason.
  *
  * Wire protocol (postMessage envelopes):
  *   child → parent:  iframe:ready, iframe:complete, iframe:progress,
