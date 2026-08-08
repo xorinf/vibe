@@ -397,7 +397,7 @@ function wrapWithSandbox(
   injectSdk: boolean,
   experienceId?: string,
 ): string {
-  // The AI is told to emit a full <!DOCTYPE html> document. If it didn't
+  // The AI emits a full <!DOCTYPE html> document. If it didn't
   // (e.g. partial fragment in early drafts), wrap it so the iframe still
   // parses cleanly.
   let body = html;
@@ -409,27 +409,18 @@ function wrapWithSandbox(
   }
 
   // Inject CSP + (optionally) the runtime SDK by rewriting the <head>.
-  // If the document doesn't have one, add it.
-  // The CSP meta tag is built from IFRAME_CSP_META_TAG in
-  // vibeSdk.ts, which strips `report-uri` and `report-to` defensively
-  // — both directives are ignored in <meta> tags per the CSP spec
-  // and the browser emits a console warning every time it parses
-  // them. We keep VIBE_IFRAME_CSP for callers that need the raw
-  // policy (e.g. HTTP headers). ponytail: belt-and-suspenders.
+  // The CSP meta tag is built from IFRAME_CSP_META_TAG in vibeSdk.ts,
+  // which strips `report-uri` and `report-to` defensively.
   const cspMeta = IFRAME_CSP_META_TAG;
 
-  // Match the parent page's theme so an AI-generated HTML without an
-  // explicit dark-mode body background still reads correctly. The
-  // parent (teacher-course-page) sets `<html class="dark">` or
-  // `<html class="light">` from its theme toggle. We mirror that
-  // class on the iframe so child styles that key off `.dark` work.
-  // We also set `color-scheme: light dark` so the browser picks
-  // the right form-control + scrollbar colors, and a default
-  // `background-color` on body that defaults to a dark stage in
-  // dark mode (hsl 230 20% 7% = #12131a) and a light stage in
-  // light mode (hsl 220 16% 95% = #f0f2f4) — the platform's
-  // `--stage` token values. This means an AI-generated white HTML
-  // looks at home on either side instead of blasting white in dark.
+  // The wrapper only sets height/color-scheme. The AI's own html,body
+  // rule provides the background — setting background here would
+  // either be higher-specificity (and dark in dark mode via a
+  // :not(.light) class guard) or paint the iframe body in a way that
+  // hides the AI's gradient. The pixel that "I just want a colored
+  // background for AI HTML that forgot to set one" is better solved
+  // by the makeBlankDoc fallback (the empty/error state) than by
+  // hijacking the AI's CSS surface.
   const parentTheme =
     typeof document !== 'undefined'
       ? document.documentElement.classList.contains('dark')
@@ -437,22 +428,7 @@ function wrapWithSandbox(
         : 'light'
       : 'light';
   const themeMeta = `<meta name="color-scheme" content="light dark">`;
-  const stageBg = parentTheme === 'dark' ? 'hsl(230 20% 7%)' : 'hsl(220 16% 95%)';
-  // Match the platform's foreground token so AI-generated HTML without
-  // explicit text colors stays visible. Without the explicit `color`,
-  // the browser default (black) renders every <h1>/<p>/<span> invisible
-  // against the dark stage background. The blank-doc path (see
-  // makeBlankDoc below) already sets this — the AI-wrapped path was
-  // missing it, which is why a "simple hello" ILE rendered as a black
-  // page with no visible text.
-  const stageFg = parentTheme === 'dark' ? 'hsl(220 16% 97%)' : 'hsl(230 25% 12%)';
-  const // Only the base rule — no @media arms-race. The AI's own
-  // html,body { background: ... } rule will outrank this by source
-  // order (the AI's <style> appears later in the document). The @media
-  // arms-race (html:not(.light) at (0,1,1) vs html,body at (0,0,1))
-  // reliably hid the AI's content in dark mode. The blank-doc path
-  // (makeBlankDoc) keeps its own full dark/light handling.
-  defaultBodyStyle = `<style>html,body{height:100%;margin:0;background:${stageBg};color:${stageFg}}</style>`;
+  const defaultBodyStyle = `<style>html,body{height:100%;margin:0}</style>`;
 
   // Substitute the placeholder with the real experience id (or '' if
   // not bound yet). The empty string is a safe default because the
@@ -485,7 +461,7 @@ function wrapWithSandbox(
 }
 
 
-// ponytail: defensive. The AI-generated HTML may include its own
+ The AI-generated HTML may include its own
 // <meta http-equiv="Content-Security-Policy"> tag with a `report-uri`
 // directive. CSP's `report-uri` is ignored in <meta> tags per the
 // spec, and the browser emits a console warning every time it
