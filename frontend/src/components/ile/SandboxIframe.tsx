@@ -28,8 +28,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/utils/utils';
 import {
+  IFRAME_CSP_META_TAG,
   IFRAME_MSG_TYPES,
-  VIBE_IFRAME_CSP,
   VIBE_RUNTIME_SNIPPET,
 } from './vibeSdk';
 
@@ -328,11 +328,13 @@ function wrapWithSandbox(
 
   // Inject CSP + (optionally) the runtime SDK by rewriting the <head>.
   // If the document doesn't have one, add it.
-  // The CSP no longer carries a report-uri placeholder — that
-  // directive is ignored in <meta> tags per the CSP spec, and the
-  // browser used to spam the console warning on every iframe load.
-  const cspPolicy = VIBE_IFRAME_CSP;
-  const cspMeta = `<meta http-equiv="Content-Security-Policy" content="${cspPolicy}">`;
+  // The CSP meta tag is built from IFRAME_CSP_META_TAG in
+  // vibeSdk.ts, which strips `report-uri` and `report-to` defensively
+  // — both directives are ignored in <meta> tags per the CSP spec
+  // and the browser emits a console warning every time it parses
+  // them. We keep VIBE_IFRAME_CSP for callers that need the raw
+  // policy (e.g. HTTP headers). ponytail: belt-and-suspenders.
+  const cspMeta = IFRAME_CSP_META_TAG;
 
   // Match the parent page's theme so an AI-generated HTML without an
   // explicit dark-mode body background still reads correctly. The
@@ -391,7 +393,7 @@ function makeBlankDoc(message: string, experienceId?: string) {
   // state doesn't blast bright white when the teacher is in dark
   // mode. The parent sets `<html class="dark">` or `class="light"`
   // from its theme toggle; we mirror that on the iframe.
-  const cspPolicy = VIBE_IFRAME_CSP;
+  const cspMeta = IFRAME_CSP_META_TAG;
   const parentTheme =
     typeof document !== 'undefined'
       ? document.documentElement.classList.contains('dark')
@@ -408,7 +410,7 @@ function makeBlankDoc(message: string, experienceId?: string) {
 <html class="${parentTheme}">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="${cspPolicy}">
+${cspMeta}
 ${themeMeta}
 ${themeStyles}
 ${VIBE_RUNTIME_SNIPPET.replace('__VIBE_EXPERIENCE_ID_PLACEHOLDER__', experienceId ?? '')}

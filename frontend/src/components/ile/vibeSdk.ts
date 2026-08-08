@@ -230,3 +230,18 @@ export const VIBE_IFRAME_CSP =
   "object-src 'none'; " +
   "base-uri 'none'; " +
   "form-action 'none';";
+
+// ponytail: defensive. Even though the policy above doesn't carry
+// `report-uri`, a future code path may reintroduce it (or the AI's
+// own html may include a meta CSP via document.write). The
+// `report-uri` directive is ignored in <meta> tags per the CSP spec
+// and the browser emits a console warning every time it parses
+// it. Strip it (and the modern CSP3 equivalent `report-to`) at the
+// point of construction so the warning can never reappear.
+export const IFRAME_CSP_META_TAG = (() => {
+  const sanitized = VIBE_IFRAME_CSP
+    .replace(/;\s*report-uri[^;]*/gi, '')
+    .replace(/;\s*report-to[^;]*/gi, '')
+    .trim();
+  return `<meta http-equiv="Content-Security-Policy" content="${sanitized}">`;
+})();
