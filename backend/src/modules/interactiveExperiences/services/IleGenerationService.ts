@@ -59,6 +59,13 @@ Output rules — non-negotiable:
   sandboxed iframe with no network access.
 - The page should be visually polished: readable typography, sensible
   spacing, consistent colors. Aim for a modern educational app feel.
+- FILL THE WHOLE SCREEN — design for one-screen viewing, no scrolling.
+  Use viewport units (`vh`, `vw`, `dvh`, `dvw`) plus `width:100%;
+  height:100dvh` on `<body>` so the experience fills the user's
+  viewport edge-to-edge. Lay out content with flex/grid that adapts
+  to aspect ratio (a 13" laptop vs a portrait phone should both see
+  the whole experience). If the teacher has to scroll to discover
+  the next interaction, the design failed.
 - Include interactive controls that demonstrate the concept (buttons,
   sliders, drag/drop, canvas — whatever fits).
 - Open with an HTML comment describing the interaction type and lesson.
