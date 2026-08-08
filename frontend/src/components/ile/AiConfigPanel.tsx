@@ -74,7 +74,11 @@ const ALL_PROVIDERS: {
   {
     value: 'MiniMax',
     label: 'MiniMax',
-    description: 'MiniMax M3 / Anthropic-compatible via the MiniMax gateway.',
+    // ponytail: point teachers at the MiniMax console so they paste a
+    // MiniMax key, not another vendor's sk-… key. The previous wording
+    // was technically correct but didn't help the teacher diagnose the
+    // 401 they get when they paste the wrong vendor's key.
+    description: 'Get an API key at platform.minimax.io and paste it here. Routes through Anthropic format.',
   },
   {
     value: 'openrouter',
