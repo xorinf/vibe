@@ -458,20 +458,42 @@ function wrapWithSandbox(
       )
     : '';
 
+  // ponytail: pin the iframe to "light" so the wrapper's
+  // @media (prefers-color-scheme: dark) html:not(.light) rule
+  // doesn't elevate over the AI's own CSS. Without this, a
+  // student with a dark OS sees the iframe body painted black
+  // (the wrapper's dark stage bg has higher specificity than
+  // the AI's html,body rule) and the AI's gradient / content
+  // never renders. The AI's own stylesheet can still override
+  // by adding !important or by using a more specific selector
+  // if it really wants light mode — this is just the default.
+  // addLightClass rewrites the existing <html ...> tag to
+  // include class="light" alongside whatever the AI set.
+  const addLightClass = (html) =>
+    html.replace(/<html\s+([^>]*)>/i, (_m, attrs) => {
+      // If the AI already set class="..." keep it AND add light.
+      if (/class\s*=/i.test(attrs)) {
+        return `<html ${attrs.replace(/class\s*=\s*["']([^"']*)["']/i, (m, c) =>
+          /\b\s*light\s*\b/i.test(c) ? m : `class="${c} light"`) }>`;
+      }
+      return `<html ${attrs} class="light">`;
+    });
+
   if (/<head[\s>]/i.test(body)) {
     body = body.replace(
       /<head([^>]*)>/i,
       `<head$1>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}`,
     );
+    body = addLightClass(body);
   } else {
     // Insert a head before <html>'s body, or prepend one if no html tag.
     if (/<html[\s>]/i.test(body)) {
       body = body.replace(
         /<html([^>]*)>/i,
-        `<html$1 class="${parentTheme}"><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>`,
+        `<html$1 class="light"><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>`,
       );
     } else {
-      body = `<head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>${body}`;
+      body = `<html class="light"><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>${body}`;
     }
   }
 
