@@ -2375,6 +2375,16 @@ function TeacherCourseContent() {
                                                           name: "New Interactive Experience",
                                                           description:
                                                             "Interactive learning experience",
+                                                          // ponytail: ILE items default to
+                                                          // skippable. The Optional toggle in the
+                                                          // inline view's header controls this
+                                                          // at runtime (the teacher can flip
+                                                          // ILE items to required from the
+                                                          // toggle). The PUT /optional endpoint
+                                                          // is the one the toast is failing on;
+                                                          // fix the endpoint, keep the default
+                                                          // here.
+                                                          isOptional: true,
                                                           ileDetails: {
                                                             experienceId: "",
                                                             status: "draft",

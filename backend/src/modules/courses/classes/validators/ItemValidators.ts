@@ -752,8 +752,19 @@ class VersionItemParams {
   // so the format isn't load-bearing. Accepting any string keeps the
   // items PATCH route compatible with the slug-style courseId the rest
   // of the codebase already uses.
+  //
+  // ponytail: not all routes that bind `VersionItemParams` put
+  // `courseId` in the path (e.g. the regular `/items/:itemId/optional`
+  // PATCH is keyed on `versionId+itemId` only). Without `@IsOptional()`
+  // the validator rejects the call with `courseId must be a string`
+  // before the handler even runs — which is what the teacher sees as
+  // "Failed to update item optional status" when they toggle the
+  // Optional switch on any non-ILE picker route. The ILE picker still
+  // passes `courseId` and the validation runs on it; the non-picker
+  // routes just skip the check. Mark optional, not required.
+  @IsOptional()
   @IsString()
-  courseId: string;
+  courseId?: string;
 }
 
 class DeleteItemParams {
