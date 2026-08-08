@@ -47,8 +47,8 @@ const PROVIDER_DEFAULTS: Record<
     defaultBaseUrl: 'https://api.openai.com/v1',
   },
   MiniMax: {
-    defaultModel: 'MiniMax/MiniMax-M3',
-    defaultBaseUrl: 'https://api.minimax.com/anthropic',
+    defaultModel: 'MiniMax-M3',
+    defaultBaseUrl: 'https://api.minimax.io/anthropic',
   },
   openrouter: {
     defaultModel: 'openrouter/auto',

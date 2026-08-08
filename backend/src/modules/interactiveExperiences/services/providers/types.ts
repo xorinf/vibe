@@ -29,10 +29,15 @@ export const PROVIDER_DEFAULTS: Record<
   anthropic: { baseUrl: 'https://api.anthropic.com', defaultModel: 'claude-sonnet-4-5' },
   openai: { baseUrl: 'https://api.openai.com/v1', defaultModel: 'gpt-4o-mini' },
   // ponytail: MiniMax's Anthropic-compatible endpoint is the working
-// path for the M3 model (the OpenAI-compatible URL routes 4xx/empty
-// responses). Teachers who want the OpenAI-compat path can pick
-// `custom` and paste the URL themselves.
-MiniMax: {baseUrl: 'https://api.minimax.com/anthropic', defaultModel: 'MiniMax/MiniMax-M3'},
+  // path for the M-series models (the OpenAI-compatible URL routes 4xx/empty
+  // responses). Teachers who want the OpenAI-compat path can pick
+  // `custom` and paste the URL themselves.
+  //
+  // Defaults verified against https://platform.minimax.io/docs/api-reference/text-anthropic-api
+  // (2026-08). Model name is bare "MiniMax-M3" with no org/prefix — the
+  // old "MiniMax/MiniMax-M3" string was an OpenRouter convention leaking
+  // in from when MiniMax was first wired through openrouter/auto.
+  MiniMax: {baseUrl: 'https://api.minimax.io/anthropic', defaultModel: 'MiniMax-M3'},
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openrouter/auto' },
 };
 
