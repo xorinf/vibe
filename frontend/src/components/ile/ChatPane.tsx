@@ -57,13 +57,29 @@ export interface ChatPaneProps {
    */
   onSubmit: (text: string) => void;
   /**
-   * Fired when the teacher confirms context (YouTube URL in v1) in
-   * the Add Context dialog. The workspace owns the actual stream
-   * because it has the course context — the chat pane just hosts the
-   * menu UI. Pass undefined to hide the Add Context button.
+   * Fired when the teacher clicks Accept or Reject on an assistant
+   * bubble. The workspace uses this to flush the post-stream html to
+   * the server (the chat-pane-local accept() only updates UI state).
+   * Without this hook the Accept button is functionally a no-op for
+   * persistence — the teacher sees "Edit applied" and the doc stays
+   * exactly where it was before.
+   *
+   * Pass undefined to disable the accept/reject buttons' save side
+   * effect (the prior behaviour).
+   */
+  onSaveNow?: () => void;
+  /**
+   * Fired when the teacher confirms context in the Add Context
+   * dialog. The workspace owns the actual stream because it has the
+   * course context — the chat pane just hosts the menu UI. Pass
+   * undefined to hide the Add Context button.
+   *
+   * The set of sources mirrors `GENERATE_FROM_CONTEXT_SOURCES` in
+   * `ileApi` — YouTube in v1, Markdown later. Widening this union
+   * requires touching both sides.
    */
   onContextSelected?: (args: {
-    source: 'youtube';
+    source: 'youtube' | 'markdown';
     input: string;
     prompt: string;
   }) => void;
@@ -73,6 +89,13 @@ export interface ChatPaneProps {
   composerHidden?: boolean;
   /** Show a hint above the composer pointing the teacher to the config panel. */
   configHint?: string;
+  /**
+   * Optional settings-button handler. The chat pane itself doesn't
+   * surface a settings affordance — the workspace header carries the
+   * "Change" button — but the passthrough is preserved so the
+   * workspace's drawer can wire it through without a type error.
+   */
+  onOpenSettings?: () => void;
   className?: string;
 }
 
@@ -96,6 +119,7 @@ export function ChatPane({
   contextDisabled,
   composerHidden,
   configHint,
+  onSaveNow,
   className,
 }: ChatPaneProps) {
   const [draft, setDraft] = useState('');
@@ -165,13 +189,23 @@ export function ChatPane({
 
   const handleAccept = useCallback(() => {
     api.accept();
-  }, [api]);
+    // Flush the post-stream html to the server. The chat-pane
+    // accept() only updates the in-memory `previousHtml` pointer
+    // so future streams diff from the accepted baseline — without
+    // this hook the Accept button looks pressed but the doc stays
+    // wherever the previous save left it.
+    if (onSaveNow) onSaveNow();
+  }, [api, onSaveNow]);
 
   const handleReject = useCallback(() => {
     // The workspace owns the manualHtml reset; we just clear the
-    // lastAppliedHtml flag so the diff view goes away.
+    // stream's `previousHtml` so any pending diff view goes away.
+    // Same flush-on-click contract as Accept: reject might leave the
+    // head unchanged but we still want the auto-save timer to
+    // refire so a pending manualHtml lands on disk.
     api.reject();
-  }, [api]);
+    if (onSaveNow) onSaveNow();
+  }, [api, onSaveNow]);
 
   const handleRetry = useCallback(() => {
     if (isStreaming) return;

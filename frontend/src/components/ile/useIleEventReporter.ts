@@ -13,6 +13,8 @@ type IleAnalyticsEvent = {
   data?: unknown;
 };
 
+export type { IleAnalyticsEvent };
+
 /**
  * Host-side analytics reporter for the sandboxed runtime.
  *

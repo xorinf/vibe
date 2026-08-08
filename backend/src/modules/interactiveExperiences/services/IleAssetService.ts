@@ -141,7 +141,15 @@ export class IleAssetService {
       );
     }
 
-    // 4. Persist.
+    // 4. Persist. Insert the row FIRST so we have a stable, unique
+    //    `_id` to use as the GCS object-key component — earlier
+    //    versions passed `String(seed._id)` (undefined at this point)
+    //    which made every fresh asset land at the same GCS key
+    //    `{ownerId}/{kind}/undefined.{ext}` and silently OVERWRITE the
+    //    previous upload of the same kind. Insert-then-upload fixes
+    //    the collision; upload-then-insert had the inverse risk
+    //    (orphan GCS objects on Mongo write failure), so the repo
+    //    rollback path below still catches it.
     const seed = new IleAsset({
       ownerId: args.ownerId,
       kind: args.kind,
@@ -151,38 +159,49 @@ export class IleAssetService {
       storageKey: '', // backfilled below
       sha256,
     });
+    const saved = await this.repo.insert(seed);
     const ext = pickExtension(args.filename, args.contentType);
     const storageKey = await this.storage.upload({
       ownerId: args.ownerId,
       kind: args.kind,
-      assetId: String(seed._id),
+      assetId: String(saved._id),
       ext,
       buffer: args.buffer,
       contentType: args.contentType,
     });
-    seed.storageKey = storageKey;
+    // Persist the storageKey back onto the row so subsequent reads
+    // (list, signed URL, delete) can locate the GCS object. The
+    // storageKey is the only mutable asset field set outside the
+    // public patch() surface, so we go through a dedicated repo
+    // method that bypasses the narrow displayName/tags/favorite
+    // allowlist.
+    const finalised = await this.repo.setStorageKey(
+      args.ownerId,
+      String(saved._id),
+      storageKey,
+    );
+    const finalisedDoc = finalised ?? { ...saved, storageKey };
     try {
-      const saved = await this.repo.insert(seed);
       // 5. Fire-and-forget metadata extraction. We don't await so the
       //    upload returns fast; the UI just sees `meta` populate on the
       //    next list/refresh. Any failure is logged, never rethrown.
-      void this.extractAndPersistMetadata(saved).catch((err) => {
+      void this.extractAndPersistMetadata(finalisedDoc).catch((err) => {
         ileLog('warn', 'asset.metadata.failed', {
-          assetId: String(saved._id),
-          ownerId: saved.ownerId,
-          kind: saved.kind,
+          assetId: String(finalisedDoc._id),
+          ownerId: finalisedDoc.ownerId,
+          kind: finalisedDoc.kind,
           error: (err as Error).message,
         });
       });
 
       ileLog('info', 'asset.upload.ok', {
         ownerId: args.ownerId,
-        assetId: String(saved._id),
+        assetId: String(finalisedDoc._id),
         kind: args.kind,
         bytes: args.size,
         sha256,
       });
-      return saved;
+      return finalisedDoc;
     } catch (mongoErr) {
       // Mongo write failed after GCS upload succeeded — roll back the
       // cloud object so we don't leak storage quota on a transient

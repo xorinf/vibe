@@ -7,6 +7,21 @@ export { ActionsMenu } from './ActionsMenu';
 export { SandboxIframe } from './SandboxIframe';
 export { AiConfigPanel } from './AiConfigPanel';
 export { useIleEditor } from './useIleEditor';
+export { IleStatusPill } from './IleStatusPill';
+export { useIleSaveRefresher } from './useIleSaveRefresher';
+export { IleApiClient, IleApiError } from './IleApiClient';
+export {
+  ILE_SAVED_EVENT,
+  readIleSavedEvent,
+  type IleSavedEventDetail,
+} from './ileEvents';
+export {
+  createBackgroundJob,
+  runSseJob,
+  runXhrUploadJob,
+  type BackgroundJob,
+  type BackgroundJobStatus,
+} from './backgroundJob';
 export type { IleStreamState } from './ileStreamState';
 export type {
   ChatMessage,
@@ -40,4 +55,7 @@ export type {
   IleAiConfigInput,
   TestConnectionStatus,
   TestConnectionResult,
+  SaveIleWithItemRequest,
+  SaveIleWithItemResponse,
+  LinkIleToItemRequest,
 } from './ileApi';

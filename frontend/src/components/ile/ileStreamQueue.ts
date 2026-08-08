@@ -280,6 +280,13 @@ class IleStreamQueue {
       // we wait for the `done` event to flip our `settled` flag,
       // and we keep polling until it does. The watchdog kills the
       // job if the flag never flips.
+      //
+      // The shared `controller.signal` is the trigger both for the
+      // queue's cancel() (the bridge below) and the watchdog's
+      // 90s idle timeout. Both paths actually abort the underlying
+      // fetch now — the previous implementation created a
+      // controller without plumbing it through, so cancelling only
+      // rejected the promise while the fetch kept running.
       const cancel =
         job.args.kind === 'edit'
           ? streamIleEdit(
@@ -288,6 +295,7 @@ class IleStreamQueue {
                 prompt: job.args.prompt,
               },
               onEvent,
+              { signal: controller.signal },
             )
           : streamIleGeneration(
               {
@@ -297,6 +305,7 @@ class IleStreamQueue {
                 itemId: job.args.itemId,
               },
               onEvent,
+              { signal: controller.signal },
             );
 
       // Bridge: make job.abort() also call the ileApi cancel handle

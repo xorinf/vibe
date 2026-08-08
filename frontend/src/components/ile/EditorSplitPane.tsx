@@ -12,7 +12,7 @@
  * pane layout is responsive: below 768px the split collapses to
  * a stacked tab view; above that the draggable split kicks in.
  */
-import { useRef, useState, Component, type ReactNode, type Ref } from 'react';
+import { useMemo, useRef, useState, Component, type ReactNode, type Ref } from 'react';
 import { Code } from 'lucide-react';
 import { cn } from '@/utils/utils';
 import { CodeEditor, type CodeEditorHandle } from './CodeEditor';
@@ -49,14 +49,22 @@ export type { ViewMode };
 function CodeEditorErrorBoundary({
   children,
   fallback,
-  streamStatus,
 }: {
   children: ReactNode;
   fallback: ReactNode;
-  streamStatus: string;
 }) {
   return (
-    <ErrorBoundaryImpl fallback={fallback} key={`editor-${streamStatus}`}>
+    // The key MUST be stable. The previous `editor-${streamStatus}`
+    // key remounted the boundary (and the CodeEditor inside it) on
+    // every status transition (idle → streaming → done → error).
+    // Each remount destroyed the CodeMirror view and reset the
+    // listener state — the primary defense we'd built up
+    // (incremental dispatch + userEvent tag) never survived a
+    // single streaming cycle, so the editor froze at the first
+    // snapshot. Keep the boundary stable so its child
+    // (CodeEditor) keeps its EditorState across the whole
+    // workspace lifetime.
+    <ErrorBoundaryImpl fallback={fallback}>
       {children}
     </ErrorBoundaryImpl>
   );
@@ -175,6 +183,38 @@ export function EditorSplitPane({
   // view-mode tick would lose the user's drag.
   const [resizableMounted] = useState(true);
 
+  // Hoist the `<CodeEditor>` to a single instance. The same element
+  // reference is reused across all branches (split, code, preview),
+  // so React reconciles it as the same instance — no remount when
+  // the teacher toggles the view mode. Critical for the streaming
+  // editor to survive a split↔code toggle without losing the
+  // accumulated CodeMirror doc. Memoised so React doesn't treat
+  // it as a new element on every render.
+  const codeEditor = useMemo(
+    () => (
+      <CodeEditor
+        value={effectiveHtml}
+        onChange={onCodeChange}
+        wordWrap={wordWrap}
+        readOnly={isStreaming}
+        handleRef={(handle) => {
+          localHandleRef.current = handle;
+          editorRef.current = handle;
+          if (typeof editorHandleRef === 'function') {
+            editorHandleRef(handle);
+          } else if (editorHandleRef) {
+            (editorHandleRef as { current: CodeEditorHandle | null }).current =
+              handle;
+          }
+        }}
+        className="h-full w-full overflow-auto"
+        aria-label="Experience HTML source"
+      />
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [effectiveHtml, onCodeChange, wordWrap, isStreaming, editorHandleRef],
+  );
+
   return (
     <div className={cn('flex h-full min-h-0 flex-col bg-card ', className)}>
       <EditorToolbar
@@ -189,142 +229,112 @@ export function EditorSplitPane({
 
       {/* Body — split mode uses a drag-resizable panel group; the
           other modes use a CSS grid. The split path is mounted only
-          once so its persistence survives toolbar re-renders. */}
-      {viewMode === 'split' && resizableMounted ? (
-        <PanelGroup
-          direction="vertical"
-          autoSaveId={splitAutoSaveId}
-          onLayout={(sizes: number[]) => {
-            const first = sizes[0];
-            if (typeof first === 'number' && first > 1 && first < 99) {
-              onSplitRatioChange?.(first);
-            }
-          }}
-          className="min-h-0 flex-1"
-        >
-          <Panel id="code" order={1} defaultSize={splitRatio} minSize={20}>
-            <div className="flex h-full min-h-0 flex-col bg-background ">
-              <SourceSubHeader isStreaming={isStreaming} />
-              <div className="min-h-0 flex-1">
-                <CodeEditorErrorBoundary
-                  streamStatus={streamState.status}
-                  fallback={
-                    <textarea
-                      value={effectiveHtml}
-                      onChange={(e) => onCodeChange(e.target.value)}
-                      readOnly={isStreaming}
-                      spellCheck={false}
-                      className="h-full w-full resize-none border-0 bg-card p-3 font-mono text-xs text-foreground/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
-                      aria-label="Experience HTML source (fallback)"
-                      title="CodeMirror crashed — edit here until reload"
-                    />
-                  }
-                >
-                  <CodeEditor
-                    value={effectiveHtml}
-                    onChange={onCodeChange}
-                    wordWrap={wordWrap}
-                    readOnly={isStreaming}
-                    handleRef={(handle) => {
-                      localHandleRef.current = handle;
-                      editorRef.current = handle;
-                      if (typeof editorHandleRef === 'function') {
-                        editorHandleRef(handle);
-                      } else if (editorHandleRef) {
-                        (editorHandleRef as { current: CodeEditorHandle | null }).current =
-                          handle;
-                      }
-                    }}
-                    className="h-full w-full overflow-auto"
-                    aria-label="Experience HTML source"
-                  />
-                </CodeEditorErrorBoundary>
-              </div>
-            </div>
-          </Panel>
-          <PanelResizeHandle className={RESIZE_HANDLE_H_CLASS}>
-            <span className="sr-only">Resize code / preview</span>
-          </PanelResizeHandle>
-          <Panel id="preview" order={2} defaultSize={100 - splitRatio} minSize={20}>
-            <PreviewPane
-              state={
-                streamState.status !== 'idle' || effectiveHtml
-                  ? { ...streamState, html: effectiveHtml }
-                  : { ...streamState, html: '' }
-              }
-            />
-          </Panel>
-        </PanelGroup>
-      ) : (
-        <div className="grid min-h-0 flex-1 overflow-hidden">
-          {/* Code editor column — visible in 'code' and 'split'. */}
-          {(viewMode === 'code' || viewMode === 'split') && (
-            <div
-              className={cn(
-                'flex h-full min-h-0 flex-col border-r border-border  bg-background ',
-                viewMode === 'split' ? 'w-1/2' : 'w-full',
-              )}
-            >
-              <SourceSubHeader isStreaming={isStreaming} />
-              <div className="min-h-0 flex-1">
-                <CodeEditorErrorBoundary
-                  streamStatus={streamState.status}
-                  fallback={
-                    <textarea
-                      value={effectiveHtml}
-                      onChange={(e) => onCodeChange(e.target.value)}
-                      readOnly={isStreaming}
-                      spellCheck={false}
-                      className="h-full w-full resize-none border-0 bg-card p-3 font-mono text-xs text-foreground/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
-                      aria-label="Experience HTML source (fallback)"
-                      title="CodeMirror crashed — edit here until reload"
-                    />
-                  }
-                >
-                  <CodeEditor
-                    value={effectiveHtml}
-                    onChange={onCodeChange}
-                    wordWrap={wordWrap}
-                    readOnly={isStreaming}
-                    handleRef={(handle) => {
-                      localHandleRef.current = handle;
-                      editorRef.current = handle;
-                      if (typeof editorHandleRef === 'function') {
-                        editorHandleRef(handle);
-                      } else if (editorHandleRef) {
-                        (editorHandleRef as { current: CodeEditorHandle | null }).current =
-                          handle;
-                      }
-                    }}
-                    className="h-full w-full overflow-auto"
-                    aria-label="Experience HTML source"
-                  />
-                </CodeEditorErrorBoundary>
-              </div>
-            </div>
-          )}
+          once so its persistence survives toolbar re-renders.
 
-          {/* Preview column — visible in 'preview' and 'split'. */}
-          {(viewMode === 'preview' || viewMode === 'split') && (
-            <div
-              className={cn(
-                'h-full min-h-0',
-                viewMode === 'split' ? 'w-1/2' : 'w-full',
-              )}
-            >
+          To survive a split↔code↔preview toggle mid-stream, the
+          `<CodeEditor>` is mounted ONCE at the top of the body and
+          its visibility is controlled by `display: none` (CSS
+          `hidden` class). Previously the editor lived in TWO
+          separate JSX branches (one for split, one for the grid
+          path) and React would unmount/remount the editor every
+          time the teacher toggled the view mode — destroying the
+          CodeMirror view at the first streaming delta. The
+          `hidden` class keeps the editor mounted but invisible. */}
+
+      {/* The editor is always mounted; its container is hidden when
+          the active view mode is 'preview' (no editor pane). */}
+      <div
+        className={cn(
+          'min-h-0 flex-1',
+          viewMode === 'preview' && 'hidden',
+          viewMode === 'split' ? 'flex flex-col' : 'block',
+        )}
+      >
+        {viewMode === 'split' && resizableMounted ? (
+          <PanelGroup
+            direction="vertical"
+            autoSaveId={splitAutoSaveId}
+            onLayout={(sizes: number[]) => {
+              const first = sizes[0];
+              if (typeof first === 'number' && first > 1 && first < 99) {
+                onSplitRatioChange?.(first);
+              }
+            }}
+            className="min-h-0 flex-1"
+          >
+            <Panel id="code" order={1} defaultSize={splitRatio} minSize={20}>
+              <div className="flex h-full min-h-0 flex-col bg-background ">
+                <SourceSubHeader isStreaming={isStreaming} />
+                <div className="min-h-0 flex-1">
+                  <CodeEditorErrorBoundary
+                    fallback={
+                      <textarea
+                        value={effectiveHtml}
+                        onChange={(e) => onCodeChange(e.target.value)}
+                        readOnly={isStreaming}
+                        spellCheck={false}
+                        className="h-full w-full resize-none border-0 bg-card p-3 font-mono text-xs text-foreground/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
+                        aria-label="Experience HTML source (fallback)"
+                        title="CodeMirror crashed — edit here until reload"
+                      />
+                    }
+                  >
+                    {codeEditor}
+                  </CodeEditorErrorBoundary>
+                </div>
+              </div>
+            </Panel>
+            <PanelResizeHandle className={RESIZE_HANDLE_H_CLASS}>
+              <span className="sr-only">Resize code / preview</span>
+            </PanelResizeHandle>
+            <Panel id="preview" order={2} defaultSize={100 - splitRatio} minSize={20}>
               <PreviewPane
-                // We always render PreviewPane; it shows a friendly empty
-                // state when streamState.html is empty AND manualHtml
-                // is null. The workspace passes the effective html via
-                // `state` so the iframe always reflects the latest content.
                 state={
                   streamState.status !== 'idle' || effectiveHtml
                     ? { ...streamState, html: effectiveHtml }
                     : { ...streamState, html: '' }
                 }
               />
+            </Panel>
+          </PanelGroup>
+        ) : (
+          <div className="grid min-h-0 flex-1 overflow-hidden">
+            {/* Code editor column — visible in 'code' mode. */}
+            <div className="flex h-full min-h-0 flex-col border-r border-border  bg-background ">
+              <SourceSubHeader isStreaming={isStreaming} />
+              <div className="min-h-0 flex-1">
+                <CodeEditorErrorBoundary
+                  fallback={
+                    <textarea
+                      value={effectiveHtml}
+                      onChange={(e) => onCodeChange(e.target.value)}
+                      readOnly={isStreaming}
+                      spellCheck={false}
+                      className="h-full w-full resize-none border-0 bg-card p-3 font-mono text-xs text-foreground/80 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-ring"
+                      aria-label="Experience HTML source (fallback)"
+                      title="CodeMirror crashed — edit here until reload"
+                    />
+                  }
+                >
+                  {codeEditor}
+                </CodeEditorErrorBoundary>
+              </div>
             </div>
-          )}
+          </div>
+        )}
+      </div>
+
+      {/* Preview-only mode: render a full-width preview below the
+          editor (editor itself is hidden by the wrapper above). */}
+      {viewMode === 'preview' && (
+        <div className="min-h-0 flex-1">
+          <PreviewPane
+            state={
+              streamState.status !== 'idle' || effectiveHtml
+                ? { ...streamState, html: effectiveHtml }
+                : { ...streamState, html: '' }
+            }
+          />
         </div>
       )}
     </div>

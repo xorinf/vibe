@@ -155,7 +155,13 @@ export interface ChatDrawerProps {
   state: ReturnType<typeof useIleEditor>['state'];
   api: ReturnType<typeof useIleEditor>;
   onSubmit: (text: string) => void;
-  onContextSelected?: (args: { source: 'youtube'; input: string; prompt: string }) => void;
+  // Mirrors ChatPaneProps / AddContextMenuProps — kept as a union
+  // so the workspace can pass either kind back through the drawer.
+  onContextSelected?: (args: {
+    source: 'youtube' | 'markdown';
+    input: string;
+    prompt: string;
+  }) => void;
   contextDisabled?: boolean;
   /** Hidden when set — the workspace wires this to the AI config state
    *  so the composer is always interactive but the Send button is gated
@@ -165,6 +171,11 @@ export interface ChatDrawerProps {
   configHint?: string;
   onOpenSettings?: () => void;
   onClose: () => void;
+  /** Fired when the teacher clicks Accept/Reject. The workspace
+   *  uses this to flush the post-stream html to the server —
+   *  without it, Accept looks pressed but the doc stays where the
+   *  previous save left it. */
+  onAcceptOrReject?: () => void;
 }
 
 export const ChatDrawer = forwardRef<ImperativePanelHandle, ChatDrawerProps>(function ChatDrawer(
@@ -184,6 +195,7 @@ export const ChatDrawer = forwardRef<ImperativePanelHandle, ChatDrawerProps>(fun
         api={props.api}
         onSubmit={props.onSubmit}
         onContextSelected={props.onContextSelected}
+        onSaveNow={props.onAcceptOrReject}
         contextDisabled={props.contextDisabled}
         composerHidden={props.composerHidden}
         configHint={props.configHint}

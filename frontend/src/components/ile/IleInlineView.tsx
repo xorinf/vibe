@@ -29,6 +29,7 @@ import {
   Link2,
   Pencil,
   RefreshCw,
+  Trash2,
   X,
   Sparkles,
   Search,
@@ -44,6 +45,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { SandboxIframe } from './SandboxIframe';
+import { IleStatusPill } from './IleStatusPill';
 import {
   getIleExperience,
   listIleExperiences,
@@ -81,6 +83,15 @@ export interface IleInlineViewProps {
     currentVersion: number;
     updatedAt: number;
   }) => Promise<void> | void;
+  /**
+   * Delete this itemsGroup row. The parent is responsible for issuing
+   * the DELETE /api/courses/.../items/... call and refetching the
+   * version tree. The ILE doc (if any) is left in the library —
+   * its `itemId` field will be stale but the doc itself stays
+   * queryable. We don't cascade-delete because the teacher might
+   * want to keep the ILE for reuse.
+   */
+  onDelete: () => Promise<void> | void;
   onClose: () => void;
 }
 
@@ -93,6 +104,7 @@ export function IleInlineView({
   experienceId,
   onOpenWorkspace,
   onLinkExisting,
+  onDelete,
   onClose,
 }: IleInlineViewProps) {
   // Fetch the ILE doc so the preview shows the canonical saved
@@ -198,18 +210,17 @@ export function IleInlineView({
       {/* Header — title + edit/swap/refresh/close chips. The chip on
           the right is "Edit" when an experience is linked, "Open
           workspace" when nothing is linked yet, so the teacher always
-          has a clear next action. */}
+          has a clear next action. The status pill next to the title
+          is shown for every state (Draft / Published / Archived) so
+          the teacher always knows whether students can play this
+          experience or not. */}
       <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
           <Sparkles className="h-4 w-4 text-ai" />
           <h2 className="truncate text-sm font-semibold text-foreground">
             {itemName}
           </h2>
-          {saved?.status && saved.status !== 'draft' && (
-            <span className="ml-1.5 inline-flex items-center rounded-full bg-success-soft/15 px-1.5 py-0.5 text-[10px] font-medium text-success-strong">
-              {saved.status === 'published' ? 'Published' : 'Archived'}
-            </span>
-          )}
+          <IleStatusPill status={saved?.status} hasExperience={!!saved?.html || !!saved?._id} />
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {experienceId && (
@@ -256,6 +267,28 @@ export function IleInlineView({
           <Button
             variant="ghost"
             size="icon"
+            onClick={() => {
+                              // Confirm before deleting. The ILE doc
+                              // (if any) is left in the library; only
+                              // the itemsGroup row is removed.
+                              if (
+                                window.confirm(
+                                  `Delete "${itemName}" from this section? The experience will be removed from the section but stays in your ILE library.`,
+                                )
+                              ) {
+                                void onDelete();
+                              }
+                            }}
+            aria-label="Delete this ILE item"
+            title="Delete this item from the section"
+            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            data-testid="ile-view-delete"
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
             aria-label="Close ILE view"
             title="Close"
@@ -280,25 +313,94 @@ export function IleInlineView({
       */}
       <div className="relative min-h-[60vh] flex-1 bg-stage text-stage-foreground overflow-hidden">
         {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-stage-foreground/80">
+          <div
+            className="absolute inset-0 flex items-center justify-center text-xs text-stage-foreground/80"
+            data-testid="ile-inline-loading"
+          >
             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             Loading experience…
           </div>
-        ) : error ? (
-          <div className="absolute inset-0 flex items-center justify-center p-6 text-center text-sm text-destructive-foreground">
-            {error}
+        ) : error && !saved ? (
+          // Backend couldn't load the ILE doc. This is the most
+          // common error state: the itemsGroup row exists (it
+          // points at an experienceId) but the interactive_
+          // experiences document is missing — typically because it
+          // was deleted out-of-band, or the itemsGroup row was
+          // re-pointed at a doc that doesn't exist. The teacher
+          // needs a clear way out: retry the fetch, link a
+          // different ILE, or open the workspace to generate fresh
+          // content.
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-8 text-center text-stage-foreground">
+            <Sparkles className="h-10 w-10 text-stage-foreground/60" />
+            <p className="text-base font-medium">
+              {/not\s*found/i.test(error)
+                ? "The experience this item points to is missing"
+                : "Couldn't load the experience"}
+            </p>
+            <p className="max-w-md text-xs text-stage-foreground/70">
+              {/not\s*found/i.test(error)
+                ? 'The itemsGroup row still references an experienceId, but the document it points at no longer exists. You can link an existing ILE or open the workspace to generate a new one.'
+                : (error || 'An unknown error occurred while fetching the experience.')}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setReloadKey((k) => k + 1)}
+                data-testid="ile-inline-retry"
+              >
+                Try again
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setLinkPickerOpen(true)}
+                className="gap-1"
+              >
+                <Link2 className="h-3.5 w-3.5" />
+                Link existing
+              </Button>
+              <Button
+                size="sm"
+                onClick={onOpenWorkspace}
+                className="gap-1"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+                Open workspace
+              </Button>
+            </div>
           </div>
         ) : saved?.html ? (
           <SandboxIframe
             key={`preview-${saved._id}-${saved.currentVersion ?? 0}`}
             html={saved.html}
             experienceId={saved._id}
-            // No SDK in the inline view — the SDK's `setContent`
-            // (document.open + document.write) was racing the AI
-            // script and the inline view always shows the saved
-            // snapshot anyway, not the live editor stream. The
-            // workspace's centre canvas (EditorSplitPane) keeps
-            // injectSdk=true for its real-time updates.
+            // No SDK in the inline view. Two reasons:
+            //
+            // 1. SandboxIframe's "live update" effect races the AI
+            //    script — when `injectSdk={true}` and the iframe has
+            //    booted, it calls `vibe.setContent` on every html
+            //    change, which does `document.open + write + close`.
+            //    The first call wipes the just-rendered AI HTML and
+            //    re-parses it, orphaning any listeners the AI script
+            //    attached during the initial render. The teacher then
+            //    sees a "frozen" preview where the static HTML
+            //    renders (level/theme selectors, score boxes) but
+            //    click handlers and object-spawning code never run —
+            //    exactly the symptom the user reported.
+            // 2. Teacher previews don't need `vibe.complete` or
+            //    `vibe.interact` (those are student-side analytics).
+            //    The teacher's "interact" is just clicking around to
+            //    see how the experience plays; nothing is recorded.
+            //
+            // With `injectSdk={false}` the iframe still loads and
+            // runs the AI's inline scripts — the sandbox attribute
+            // is unchanged (allow-scripts allow-same-origin via
+            // `allowSameOrigin`), and the native `onLoad` still
+            // clears the booting overlay. The only thing we lose
+            // is the postMessage handshake + analytics queue, which
+            // the teacher never needed.
+            injectSdk={false}
             allowSameOrigin
             className="absolute inset-0"
           />

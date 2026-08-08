@@ -170,6 +170,35 @@ export const ILE_ASSET_UPLOAD_OPTIONS: Record<IleAssetKind, multer.Options> = IL
   {} as Record<IleAssetKind, multer.Options>,
 );
 
+/**
+ * Multer options for the upload route itself. Routing-controllers only
+ * allows a single static `options` per @UploadedFile decorator — the
+ * per-kind options above can't be applied until `body.kind` is parsed.
+ * So we let multer accept the UNION of every kind's mimetypes and the
+ * LARGEST kind's maxBytes (currently 50 MB for video). The controller
+ * then narrows per-kind using the values in ILE_ASSET_LIMITS.
+ *
+ * This guards against the DoS case where a hostile client streams a
+ * giant body before the controller sees it: multer hard-stops the
+ * upload at the union limit. The per-kind narrow stays in the
+ * controller boundary so tests + direct service callers still get
+ * validated.
+ */
+export const ILE_ASSET_UPLOAD_UNION_OPTIONS: multer.Options = (() => {
+  const allMimetypes = new Set<string>();
+  let maxBytes = 0;
+  for (const kind of ILE_ASSET_KINDS) {
+    for (const m of ILE_ASSET_LIMITS[kind].mimetypes) allMimetypes.add(m);
+    if (ILE_ASSET_LIMITS[kind].maxBytes > maxBytes) {
+      maxBytes = ILE_ASSET_LIMITS[kind].maxBytes;
+    }
+  }
+  return makeUploadOptions({
+    allowed: Array.from(allMimetypes),
+    maxBytes,
+  });
+})();
+
 /** Query params for GET /assets — search + kind filter + limit. */
 export class ListIleAssetsQuery {
   @JSONSchema({ type: 'string', enum: ILE_ASSET_KINDS as unknown as string[] })
@@ -271,6 +300,92 @@ export class VersionedSaveIleBody {
   label?: string;
 }
 
+/**
+ * POST /api/interactive-experiences/save-with-item
+ *
+ * The single source of truth for the ILE save flow. Persists the
+ * ILE doc AND patches the matching itemsGroup row in the same
+ * Mongo transaction. This replaces the old two-step pattern (save
+ * the ILE doc, then PATCH the itemsGroup from the frontend) which
+ * was the root cause of orphan-row bugs.
+ *
+ * The `itemId` is the itemsGroup row's _id. It's optional —
+ * teachers may save experiences that aren't bound to a course
+ * (e.g. from the ILE library without an open course). In that case
+ * the itemsGroup update is skipped and only the ILE doc is saved.
+ */
+export class SaveWithItemBody {
+  @JSONSchema({
+    description: 'Existing experience ID — omit on first save',
+    type: 'string',
+  })
+  @IsOptional()
+  @IsString()
+  _id?: string;
+
+  @JSONSchema({
+    description: 'Course ID',
+    type: 'string',
+  })
+  @IsOptional()
+  @IsString()
+  courseId?: string;
+
+  @JSONSchema({
+    description: 'Course version ID',
+    type: 'string',
+  })
+  @IsOptional()
+  @IsString()
+  courseVersionId?: string;
+
+  @JSONSchema({
+    description:
+      'itemsGroup row _id to bind this save to. Omit for library-only ' +
+      'experiences that are not attached to a course item.',
+    type: 'string',
+  })
+  @IsOptional()
+  @IsString()
+  itemId?: string;
+
+  @JSONSchema({
+    description: 'Title for the experience',
+    example: 'Counting Quest',
+    type: 'string',
+  })
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(200)
+  title: string;
+
+  @JSONSchema({
+    description: 'Original generation prompt (optional)',
+    type: 'string',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(4000)
+  prompt?: string;
+
+  @JSONSchema({
+    description: 'Generated HTML payload',
+    type: 'string',
+  })
+  @IsNotEmpty()
+  @IsString()
+  html: string;
+
+  @JSONSchema({
+    description: 'Optional short label for this version',
+    type: 'string',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  label?: string;
+}
+
 export class IleVersionParam {
   @JSONSchema({ type: 'integer', minimum: 1 })
   @IsNotEmpty()
@@ -278,6 +393,70 @@ export class IleVersionParam {
 }
 
 const PROVIDER_VALUES = ['anthropic', 'openai', 'MiniMax', 'openrouter', 'custom'] as const;
+
+/**
+ * POST /api/interactive-experiences/:id/link-item
+ *
+ * Wire a single, already-saved ILE doc to a course item. The
+ * teacher uses this from the "Link existing experience" picker
+ * in the inline view — the rich content lives in the original
+ * ILE doc, the itemsGroup row gets a pointer to it, and no
+ * copy is made.
+ *
+ * Distinct from the unified save-with-item endpoint because:
+ *   - The ILE doc is NOT re-saved (no new version snapshot, no
+ *     new HTML write — the existing ILE is the source of truth).
+ *   - The auth check is "is the user the ILE's owner", not
+ *     "does the user have course-level write permission" —
+ *     so a teacher can attach their ILE to any course item,
+ *     not just ones they have a teacher-role for.
+ *   - The itemsGroup row's pointer flips atomically with the
+ *     ILE doc's `itemId` flip — same transaction contract as
+ *     save-with-item.
+ *
+ * Body fields:
+ *   - courseId        (required) — the course the item lives in.
+ *   - courseVersionId (required) — the version (so we can locate
+ *                                       the itemsGroup parent if the
+ *                                       backend decides to support
+ *                                       cross-version linking in
+ *                                       the future).
+ *   - itemId          (required) — the itemsGroup row's _id.
+ *   - label           (optional) — short note attached to the
+ *                                       link's history entry (the
+ *                                       ILE's own `label` on its
+ *                                       current version is left
+ *                                       alone; this only feeds a
+ *                                       future audit log).
+ */
+export class LinkItemBody {
+  @JSONSchema({ description: 'Course ID', type: 'string' })
+  @IsNotEmpty()
+  @IsString()
+  courseId: string;
+
+  @JSONSchema({ description: 'Course version ID', type: 'string' })
+  @IsNotEmpty()
+  @IsString()
+  courseVersionId: string;
+
+  @JSONSchema({
+    description: 'itemsGroup row _id to bind this ILE to',
+    type: 'string',
+  })
+  @IsNotEmpty()
+  @IsString()
+  itemId: string;
+
+  @JSONSchema({
+    description: 'Optional short label for the link operation',
+    type: 'string',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  label?: string;
+}
 
 /**
  * PUT /api/interactive-experiences/config

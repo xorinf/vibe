@@ -67,20 +67,26 @@ export function IleWorkspaceDialog({
       }}
     >
       <DialogContent
-        // Near-fullscreen. We keep a small padding so the close (×)
-        // button stays visible without crowding the workspace.
-        // [&>button:has(span.sr-only)]:hidden — Radix injects an X close
-        // button at absolute right-4 top-4 with a hidden "Close" label
-        // for screen readers. The workspace owns its own close button
-        // in the header, so we suppress the default to avoid the two
-        // competing for the same corner. Selector targets the Radix
-        // button specifically — the only <button> whose only child is
-        // a sr-only span — our header close has an icon.
-        className="h-[95vh] w-[min(1400px,95vw)] max-w-none gap-0 overflow-hidden border-border  bg-card  p-0 [&>button:has(>span.sr-only)]:hidden"
+        // Default to true fullscreen when the workspace opens —
+        // the teacher is doing focused work, not glancing at the
+        // course page underneath. We keep a 1px visual seam (border)
+        // instead of zero, so the dialog overlay still reads as
+        // "layered on top of the page" rather than "is the page".
+        // The Radix X close button is suppressed (the workspace
+        // owns its own close button in the header). Selector targets
+        // the Radix button specifically — the only <button> whose
+        // only child is a sr-only span — our header close has an icon.
+        // Override the base DialogContent's centred positioning
+        // (left-1/2 top-1/2 + translate-[-50%]). `inset-0` zeros out
+        // the offsets but the *transform* still applies, shifting the
+        // dialog off the visible viewport. The `!` important modifier
+        // outranks the base class without depending on Tailwind's
+        // generated CSS source order.
+        className="!left-0 !top-0 !translate-x-0 !translate-y-0 h-screen w-screen max-w-none gap-0 overflow-hidden rounded-none border border-border bg-card p-0 [&>button:has(>span.sr-only)]:hidden"
         aria-describedby="ile-workspace-description"
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>Interactive Learning Experience workspace</DialogTitle>
+          <DialogTitle>Interactive Experience workspace</DialogTitle>
           <DialogDescription id="ile-workspace-description">
             Generate, edit, and publish an AI-powered interactive learning
             experience. Save attaches it to the current course item.

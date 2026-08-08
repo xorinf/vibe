@@ -15,7 +15,7 @@
  * analytics flusher.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, RefreshCw, Maximize2, Minimize2, X, AlertTriangle } from 'lucide-react';
+import { Eye, RefreshCw, Maximize2, X, AlertTriangle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { SandboxIframe } from './SandboxIframe';
 import { cn } from '@/utils/utils';

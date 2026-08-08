@@ -8,7 +8,6 @@ import {
   Film,
   FileText,
   Code2,
-  X,
   RefreshCw,
   ExternalLink,
 } from 'lucide-react';

@@ -6,88 +6,43 @@
  * `/interactive-experiences/:id/play` endpoint and mounts the
  * sandboxed iframe in place. The student stays on the course page
  * the whole time — no navigation, no chrome around the iframe.
- *
- * Hosts the same analytics hooks as the legacy routed
- * `StudentILEWorkspace` (event reporter) so postMessage → server
- * analytics still work. The presentation chrome (banner, header,
- * progress bar, completion banner) is shared with `StudentILEWorkspace`
- * via `StudentPlayerChrome`.
+ * The student route's own FloatingBackButton / course drawer /
+ * AICompanion cover the chrome's prior responsibilities
+ * (navigation, completion advance, help).
  */
-import { useEffect, useRef, useState } from 'react';
-import { RefreshCw } from 'lucide-react';
-import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
-import { SandboxIframe, type SandboxIframeProps } from './SandboxIframe';
-import { useIleEventReporter } from './useIleEventReporter';
+import { useEffect, useState } from 'react';
+import { SandboxIframe } from './SandboxIframe';
 import { getStudentIlePayload, type StudentIlePayload } from './ileApi';
-import { StudentPlayerChrome } from './StudentPlayerChrome';
 
 export interface InlineStudentIleViewerProps {
   experienceId: string;
-  courseId?: string;
-  courseVersionId?: string;
-  /**
-   * Host callback invoked once when the iframe's runtime is
-   * ready. Receives a stable flush function that the parent can
-   * invoke to force the runtime to drain its analytics queue
-   * synchronously — used on navigation away from the ILE so
-   * the last 1-2 seconds of events don't sit in the queue when
-   * the iframe is unmounted.
-   */
-  onFlushReady?: (flush: () => void) => void;
-  /**
-   * Called when the student clicks "Resume Lesson" after
-   * completing the ILE. The ItemContainer wires this to the
-   * course page's `onNext` so the student advances to the
-   * next item in the course tree. The ILE's analytics
-   * events (which include the `complete` event from the
-   * runtime) are already POSTed to the server by the time
-   * this fires — the parent's "Next" navigation is the
-   * correct persistence path for `isCompleted`.
-   */
-  onCompleteAdvance?: () => void;
 }
 
 /**
  * Bare-bones renderer. Mounts the iframe full-bleed inside its parent
- * (the ItemContainer slot) and overlays a minimal exit / refresh bar
- * so the student can return to the course list without depending on a
- * browser back gesture.
+ * (the ItemContainer slot). The AI owns the visual surface — no
+ * chrome, no reload button, no overlays. Error / loading states
+ * surface as minimal full-bleed messages (signals of failure, not
+ * chrome). If the ILE is stuck, the student refreshes the page
+ * (Cmd+R) — adding a "Reload" button over the AI's content is its
+ * own small UX violation.
  */
 export function InlineStudentIleViewer({
   experienceId,
-  courseId,
-  courseVersionId,
-  onFlushReady,
-  onCompleteAdvance,
 }: InlineStudentIleViewerProps) {
   const [payload, setPayload] = useState<StudentIlePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [remountKey, setRemountKey] = useState(0);
-  const [completed, setCompleted] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-
-  // Same analytics plumbing the routed workspace used. The hook reads
-  // the student's Firebase token on every flush, so logout / token
-  // refresh Just Works.
-  const { reportAnalytics } = useIleEventReporter({
-    experienceId,
-    courseId,
-    courseVersionId,
-  });
 
   useEffect(() => {
     if (!experienceId) {
       // ponytail: previously the early-return left `loading: true`
-      // forever and StudentPlayerChrome rendered the
-      // "Loading experience…" overlay with no path out. The teacher
-      // adding an ILE item to a section creates an IeItem row with
-      // `details.experienceId = ''` (see ItemBase for INTERACTIVE_EXPERIENCE
-      // in classes/transformers/Item.ts) until the workspace saves the
-      // first experience. Surface a real message so the student
-      // sees "not yet generated" instead of a stuck spinner.
+      // forever and the chrome rendered the "Loading experience…"
+      // overlay with no path out. The teacher adding an ILE item to
+      // a section creates an itemsGroup row with `experienceId = ''`
+      // until the workspace saves the first experience. Surface a
+      // real message so the student sees "not yet generated"
+      // instead of a stuck spinner.
       setPayload(null);
       setLoading(false);
       setError('This experience has not been created yet.');
@@ -111,52 +66,42 @@ export function InlineStudentIleViewer({
     };
   }, [experienceId]);
 
-  const handleReload = () => setRemountKey((v) => v + 1);
-
   return (
-    <StudentPlayerChrome
-      title={payload?.title ?? 'Interactive Experience'}
-      progress={progress}
-      completed={completed}
-      errorMessage={error}
-      loading={loading}
-      experienceId={experienceId}
-      theme="light"
-      showFullscreen
-      showCopyLink={false}
-      showCoach={false}
-      onCompleteAdvance={onCompleteAdvance}
-    >
-      <div ref={containerRef} className="absolute inset-0">
-        {payload && (
-          <SandboxIframe
-            html={payload.html}
-            experienceId={experienceId}
-            // ponytail: match the teacher view (IleInlineView) exactly.
-            // The teacher sets injectSdk={false} + allowSameOrigin +
-            // className="absolute inset-0". The student renders
-            // identically now. The user explicitly asked for the
-            // teacher's setup. End of story.
-            injectSdk={false}
-            allowSameOrigin
-            className="absolute inset-0"
-            remountKey={remountKey}
-            emptyMessage="Loading experience…"
-          />
-        )}
-        {!loading && !error && payload && (
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={handleReload}
-            aria-label="Reload experience"
-            title="Reload"
-            className="absolute right-3 top-3 z-10 h-9 w-9 bg-background  shadow-sm hover:bg-accent"
-          >
-            <RefreshCw className="h-4 w-4" />
-          </Button>
-        )}
-      </div>
-    </StudentPlayerChrome>
+    // ponytail: no chrome. The student route already provides
+    // navigation (FloatingBackButton, course drawer), AI help
+    // (AICompanion), and completion advancement (course onNext) —
+    // the chrome was duplicating that with a thin "interactive
+    // learning experience" header at the top, which the user asked
+    // to remove. Render the iframe full-bleed; the AI owns the
+    // visual surface. Error / loading states still surface as a
+    // minimal overlay (we don't drop those — they're a signal of
+    // failure, not chrome).
+    <div className="absolute inset-0">
+      {loading && !payload && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background  text-sm text-muted-foreground ">
+          Loading experience…
+        </div>
+      )}
+      {error && !payload && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background  p-8 text-center text-sm text-destructive-foreground">
+          {error}
+        </div>
+      )}
+      {payload && (
+        <SandboxIframe
+          html={payload.html}
+          experienceId={experienceId}
+          // ponytail: match the teacher view (IleInlineView) exactly.
+          // The teacher sets injectSdk={false} + allowSameOrigin +
+          // className="absolute inset-0". The student renders
+          // identically now. The user explicitly asked for the
+          // teacher's setup. End of story.
+          injectSdk={false}
+          allowSameOrigin
+          className="absolute inset-0"
+          emptyMessage="Loading experience…"
+        />
+      )}
+    </div>
   );
 }

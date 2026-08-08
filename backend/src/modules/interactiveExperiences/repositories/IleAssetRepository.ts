@@ -81,6 +81,27 @@ export class IleAssetRepository {
     return result ?? null;
   }
 
+  /**
+   * Set the GCS `storageKey` after the asset has been uploaded. Lives
+   * outside the `patch()` allowlist because the storageKey is
+   * service-managed (the repo isn't allowed to be tricked into
+   * pointing at another teacher's GCS bucket). Returns the
+   * post-update row or null if the id was unknown.
+   */
+  async setStorageKey(
+    ownerId: string,
+    id: string,
+    storageKey: string,
+  ): Promise<IleAsset | null> {
+    if (!ObjectId.isValid(id)) return null;
+    const result = await (await this.col()).findOneAndUpdate(
+      { _id: new ObjectId(id), ownerId, deletedAt: { $exists: false } },
+      { $set: { storageKey, updatedAt: new Date() } },
+      { returnDocument: 'after' },
+    );
+    return result ?? null;
+  }
+
   async updateMeta(ownerId: string, id: string, meta: IleAsset['meta']): Promise<void> {
     if (!ObjectId.isValid(id)) return;
     await (await this.col()).updateOne(

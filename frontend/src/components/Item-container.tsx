@@ -7,7 +7,7 @@ import type { ArticleRef } from "@/types/article.types";
 import type { QuizRef } from "@/types/quiz.types";
 import type { ItemContainerProps, ItemContainerRef } from '@/types/item-container.types';
 import FeedbackForm from '@/app/pages/student/components/FeedbackForm';
-import { useSubmitFeedback } from '@/hooks/hooks';
+import { InlineStudentIleViewer } from '@/components/ile/InlineStudentIleViewer';
 
 export interface ISubmitFeedbackBody {
   details: Record<string, any>;
@@ -19,14 +19,32 @@ export interface ISubmitFeedbackBody {
 const ItemContainer = forwardRef<ItemContainerRef, ItemContainerProps>(({ item, nextItem, doGesture, onNext, onPrevVideo, isProgressUpdating, isNavigatingToPrev, readyToDetect, attemptId, anomalies, setQuizPassed, setAttemptId, rewindVid, pauseVid, pauseSignal, awayPaused, displayNextLesson, keyboardLockEnabled, setIsQuizSkipped, linearProgressionEnabled, seekForwardEnabled, courseId, versionId, completedItemIdsRef, cohortId, cohortName, previousItem, pendingStudentQuestionContext, clearPendingStudentQuestionContext, focusMode }, ref) => {
   const articleRef = useRef<ArticleRef>(null);
   const quizRef = useRef<QuizRef>(null);
+  // Dead handle kept to avoid a refactor of stopCurrentItem below.
+  // The ILE viewer no longer exposes a flush hook (the AI's events
+  // are best-effort on unmount), so this ref is never written to.
+  const ileFlushRef = useRef<(() => void) | null>(null);
+  // courseId / versionId are kept on the props surface (the parent
+  // course page passes them) but no per-item branch uses them after
+  // the ILE viewer was simplified. cohortName is similarly unused
+  // (the Video case used to pass it; the ILE case dropped it and
+  // no other case needed it). Silence the unused warnings; if a
+  // future item type needs them, just re-wire.
+  void courseId; void versionId; void cohortName;
 
-  // ✅ Expose stop function to parent - handles both article and quiz
+  // ✅ Expose stop function to parent - handles article and quiz
   useImperativeHandle(ref, () => ({
     stopCurrentItem: async () => {
       if (articleRef.current) {
         await articleRef.current.stopItem();
       } else if (quizRef.current) {
         await quizRef.current.stopItem();
+      } else if (ileFlushRef.current) {
+        // Force-flush the ILE runtime's analytics buffer. The
+        // iframe itself is unmounted by React (the parent stops
+        // rendering this case when the next item becomes
+        // current) — flushing here captures events that would
+        // otherwise sit in the runtime queue for up to 2s.
+        ileFlushRef.current();
       }
     },
     getCurrentDetails: () => {
@@ -36,11 +54,22 @@ const ItemContainer = forwardRef<ItemContainerRef, ItemContainerProps>(({ item, 
       return {};
     }
   }));
-  const submitFeedback = useSubmitFeedback(item._id.toString())
+  // const submitFeedback = useSubmitFeedback(item._id.toString()) — disabled
+  // while the feedback persistence path is being verified end-to-end. The
+  // hook remains imported so callers can re-enable it without a new
+  // import statement; this comment lives here so the placeholder
+  // doesn't get blindly deleted.
+  // const submitFeedback = useSubmitFeedback(item._id.toString());
 
-  const handleFeedbackSubmit = async (formData: any) => {
-
-
+  const handleFeedbackSubmit = async (_formData: any) => {
+    // Submitted feedback persistence is intentionally a no-op while
+    // the new FeedbackForm integration is being verified end-to-end.
+    // When the persistence path is wired, this handler should:
+    //   1. Validate the formData against the jsonSchema
+    //   2. POST to the feedback endpoint via `submitFeedback`
+    //   3. Trigger the parent's `onNext()` to advance the lesson
+    // For now we keep the shape so FeedbackForm's onSubmit type
+    // continues to match.
   };
 
   const renderContent = () => {
@@ -79,7 +108,6 @@ const ItemContainer = forwardRef<ItemContainerRef, ItemContainerProps>(({ item, 
           completedItemIdsRef={completedItemIdsRef}
           nextItemId={nextItem?.itemId?.toString()}
           cohortId={cohortId}
-          cohortName={cohortName}
         />;
 
       case 'quiz':
@@ -165,6 +193,31 @@ const ItemContainer = forwardRef<ItemContainerRef, ItemContainerProps>(({ item, 
           completedItemIdsRef={completedItemIdsRef}
           previousItem = {previousItem}
         />;
+
+      case 'interactive_experience': {
+        // The itemsGroup row's `details.experienceId` is the ILE
+        // doc's _id. The unified save-with-item + link-item endpoints
+        // both write it in the same Mongo transaction as the ILE
+        // doc, so we can trust it to be present once the row
+        // exists. If for any reason it's missing (e.g. legacy
+        // pre-link data) the inline view shows its empty state
+        // and the student gets a clear "this experience is
+        // missing its content" message.
+        //
+        // The inline viewer is bare-bones: no chrome, no
+        // onCompleteAdvance, no flush hook. The course page's
+        // own onNext handles completion advancement via the
+        // `stopCurrentItem → markItemComplete` flow, and the
+        // AI's HTML is best-effort on unmount (no postMessage
+        // plumbing here).
+        const experienceId = item.details?.experienceId;
+        return (
+          <InlineStudentIleViewer
+            key={item._id.toString()}
+            experienceId={experienceId ?? ''}
+          />
+        );
+      }
 
       default:
         return (

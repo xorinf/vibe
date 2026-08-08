@@ -65,6 +65,9 @@ import { cn } from "@/utils/utils";
 import { QuestionUploadDialog } from "@/components/question-upload-dialog";
 import { IleWorkspaceDialog } from "@/components/ile/IleWorkspaceDialog";
 import { IleInlineView } from "@/components/ile/IleInlineView";
+import { IleStatusPill } from "@/components/ile/IleStatusPill";
+import { useIleSaveRefresher } from "@/components/ile/useIleSaveRefresher";
+import { linkIleToItem, IleApiError } from "@/components/ile/ileApi";
 import ConfirmationModal from "./components/confirmation-modal";
 import { useMatches, Link } from "@tanstack/react-router";
 import {
@@ -99,14 +102,15 @@ const getItemIcon = (type: string) => {
     case "VIDEO": return <VideoIcon className="h-3 w-3" />;
     case "QUIZ": return <ListChecks className="h-3 w-3" />;
     case "PROJECT": return <FolderKanban className="h-3 w-3" />;
-    case "FEEDBACK": return <MessageSquare className="h-3 w-3" />
+    case "FEEDBACK": return <MessageSquare className="h-3 w-3" />;
+    case "INTERACTIVE_EXPERIENCE": return <Sparkles className="h-3 w-3" />;
     default: return null;
   }
 };
 
 interface LabelOptions {
   itemId: string;
-  itemType: "VIDEO" | "QUIZ" | "BLOG" | "PROJECT" | "FEEDBACK";
+  itemType: "VIDEO" | "QUIZ" | "BLOG" | "PROJECT" | "FEEDBACK" | "INTERACTIVE_EXPERIENCE";
   sectionItems: Record<string, any[]>;
   sectionId: string;
 }
@@ -475,20 +479,49 @@ function TeacherCourseContent() {
   } | null>(null);
   const [quizCsvDialogOpen, setQuizCsvDialogOpen] = useState(false);
 
-  // ILE (Interactive Playground) workspace dialog state.
-  // When the teacher picks "Interactive Playground" from the Add Item
-  // dropdown, we capture the course/section context, open the dialog,
-  // and let the workspace handle the rest (no course-item API call --
-  // ILEs live in their own interactive_experiences collection).
+  // ILE (Interactive Experience) workspace dialog state.
+  // When the teacher picks "Interactive Experience" from the Add Item
+  // dropdown, we:
+  //   1. POST /courses/.../items to create the itemsGroup row with
+  //      type=INTERACTIVE_EXPERIENCE (empty experienceId, status=draft).
+  //   2. On success, capture the new item's _id — that _id is the
+  //      itemsGroup row's item ref. The workspace needs it for two
+  //      things:
+  //        - `itemId` is bound into the ILE doc (lets the ILE API
+  //          attribute the experience to a course item for analytics).
+  //        - `itemsGroupItemId` is the target the post-save
+  //          `ile:saved` listener PATCHes with the new ILE pointer.
+  //   3. Open the dialog with both ids in `defaults`.
+  // ILEs live in the `interactive_experiences` collection; the
+  // itemsGroup row in this collection just mirrors the ILE pointer
+  // so the section's item list can show the ILE like any other item.
   const [ileWorkspaceOpen, setIleWorkspaceOpen] = useState(false);
   const [ileCourseContext, setIleCourseContext] = useState<{
     courseId: string;
     courseVersionId: string;
     itemId?: string;
+    itemsGroupItemId?: string;
+    experienceId?: string;
   } | null>(null);
 
 
   const updateItemOptional = useUpdateItemOptional();
+
+  // Listen for the workspace's `ile:saved` window event. The
+  // listener is the single line below — the real work is in
+  // `useIleSaveRefresher`. With the unified save endpoint the
+  // BACKEND is now the source of truth — the ILE doc and the
+  // itemsGroup $set commit atomically in one Mongo transaction
+  // before this event is dispatched. The hook's only job is
+  // to refetch the section's view so the new status pill +
+  // experienceId pointer show up in the tree.
+  useIleSaveRefresher({
+    refetchVersion,
+    refetchItems,
+    shouldFetchItems,
+    selectedEntity,
+    setSelectedEntity,
+  });
 
   // Refetch after any success
   useEffect(() => {
@@ -2101,6 +2134,7 @@ function TeacherCourseContent() {
                                                           sectionId: section.sectionId
                                                         })}
                                                       </span>
+                                                      <IleStatusPill item={item} />
                                                     </SidebarMenuSubButton>
                                                     <Button className="absolute  top-0 right-0" size="icon" variant="ghost" onClick={(e) => handleHideItem(item._id, !item.isHidden)} disabled={section.isHidden || module.isHidden || hidingItemId === item._id}>
                                                       {hidingItemId === item._id ? (
@@ -2297,14 +2331,122 @@ function TeacherCourseContent() {
                                                       setShowCSVUpload(true);
                                                     }
                                                     else if (type === "ile") {
-                                                      // Open the ILE workspace dialog instead of creating a course
-                                                      // item -- ILEs live in the interactive_experiences collection.
-                                                      setIleCourseContext({
-                                                        courseId: courseId || "",
-                                                        courseVersionId: versionId || "",
-                                                        itemId: section.sectionId,
+                                                      // Create the itemsGroup row FIRST so the section's
+                                                      // item list has a row to show. The rich ILE content
+                                                      // lives in the `interactive_experiences` collection
+                                                      // (the workspace writes to it on save); the row
+                                                      // here is just a pointer placeholder that the
+                                                      // post-save `ile:saved` listener PATCHes with
+                                                      // the real experienceId + status.
+                                                      //
+                                                      // Without this POST the section never gets a row,
+                                                      // the teacher can't find the ILE they just made,
+                                                      // and the inline view has nothing to render.
+                                                      if (!versionId) return;
+                                                      setActiveSectionInfo({
+                                                        moduleId: module.moduleId,
+                                                        sectionId: section.sectionId,
                                                       });
-                                                      setIleWorkspaceOpen(true);
+                                                      // Auto-expand the module + section so the new
+                                                      // row is visible without the teacher having to
+                                                      // click to reveal it. Without this, a teacher who
+                                                      // just clicked "Add Item → Interactive Experience"
+                                                      // sees nothing change in the sidebar — the
+                                                      // "I added it but where did it go?" question that
+                                                      // was the original bug report.
+                                                      setExpandedModules((prev) => ({
+                                                        ...prev,
+                                                        [module.moduleId]: true,
+                                                      }));
+                                                      setExpandedSections((prev) => ({
+                                                        ...prev,
+                                                        [section.sectionId]: true,
+                                                      }));
+                                                      createItemAsync({
+                                                        params: {
+                                                          path: {
+                                                            versionId,
+                                                            moduleId: module.moduleId,
+                                                            sectionId: section.sectionId,
+                                                          },
+                                                        },
+                                                        body: {
+                                                          type: "INTERACTIVE_EXPERIENCE",
+                                                          name: "New Interactive Experience",
+                                                          description:
+                                                            "Interactive learning experience",
+                                                          ileDetails: {
+                                                            experienceId: "",
+                                                            status: "draft",
+                                                            currentVersion: 0,
+                                                            updatedAt: Date.now(),
+                                                          },
+                                                        },
+                                                      })
+                                                        .then((created: any) => {
+                                                          const newItemId =
+                                                            created?.createdItem?._id;
+                                                          if (!newItemId) {
+                                                            toast.error(
+                                                              "Couldn't create the Interactive Experience item — no id returned.",
+                                                            );
+                                                            return;
+                                                          }
+                                                          // Bind the workspace to the new item so its
+                                                          // `ile:saved` event can PATCH this row with
+                                                          // the ILE pointer. Also surface the row in the
+                                                          // section by selecting it — the inline view
+                                                          // shows the empty state ("hasn't been generated
+                                                          // yet") until the teacher saves from the
+                                                          // workspace.
+                                                          setIleCourseContext({
+                                                            courseId: courseId || "",
+                                                            courseVersionId: versionId,
+                                                            itemId: newItemId,
+                                                            itemsGroupItemId: newItemId,
+                                                          });
+                                                          setIleWorkspaceOpen(true);
+                                                          // Refresh the section so the new item appears
+                                                          // in the tree right away, then select it.
+                                                          refetchVersion();
+                                                          if (
+                                                            activeSectionInfo?.sectionId ===
+                                                            section.sectionId
+                                                          ) {
+                                                            refetchItems();
+                                                          }
+                                                          setSelectedItem({
+                                                            id: newItemId,
+                                                            name: "New Interactive Experience",
+                                                          });
+                                                          setSelectedEntity({
+                                                            type: "item",
+                                                            data: {
+                                                              ...(created.createdItem as any),
+                                                              type: "INTERACTIVE_EXPERIENCE",
+                                                            },
+                                                            parentIds: {
+                                                              moduleId: module.moduleId,
+                                                              sectionId: section.sectionId,
+                                                              itemsGroupId:
+                                                                created?.itemsGroup?._id ||
+                                                                section.itemsGroupId,
+                                                            },
+                                                          });
+                                                          toast.success(
+                                                            "Interactive Experience created — open the workspace to generate content.",
+                                                          );
+                                                        })
+                                                        .catch((err: any) => {
+                                                          console.error(
+                                                            "[ILE] create item failed:",
+                                                            err,
+                                                          );
+                                                          toast.error(
+                                                            err?.message ||
+                                                              "Failed to create Interactive Experience item",
+                                                          );
+                                                        });
                                                     }
                                                     else {
                                                       setActiveSectionInfo({ moduleId: module.moduleId, sectionId: section.sectionId });
@@ -2338,7 +2480,7 @@ function TeacherCourseContent() {
                                                   {hasExistingProject ? 'Project (Limit 1 per course)' : 'Project'}
                                                 </option>
                                                 <option value="csv_upload">Upload CSV</option>
-                                                <option value="ile">Interactive Playground</option>
+                                                <option value="ile">Interactive Experience</option>
 
                                               </select>
                                               <TooltipProvider>
@@ -3434,25 +3576,37 @@ function TeacherCourseContent() {
                                 courseId: courseId || "",
                                 courseVersionId: versionId || "",
                                 itemId: selectedEntity.data._id,
+                                itemsGroupItemId: selectedEntity.data._id,
+                                ...(existing ? { experienceId: existing } : {}),
                               });
                               setIleWorkspaceOpen(true);
                             }}
                             onLinkExisting={async (picked) => {
-                              // PATCH the itemsGroup row with the
-                              // picked ILE pointer + status mirror.
-                              // Same payload shape the workspace's
-                              // `ile:saved` event uses, so the row
-                              // looks identical whether the teacher
-                              // saves from the workspace or links an
-                              // existing experience. The backend's
-                              // IeItem transformer expects `ileDetails`
-                              // (camelCase) per the validator; the
-                              // repository's `$set` writes it into the
-                              // on-disk `details` field. After the PATCH
-                              // returns, refresh `selectedEntity` so
-                              // the inline view re-fetches the
-                              // experience and the section tree shows
-                              // the green Published pill.
+                              // The "Link existing experience" picker hands
+                              // us the ILE doc the teacher wants to bind.
+                              // We call the new `linkIleToItem` endpoint
+                              // (POST /:id/link-item) which:
+                              //   - updates the ILE doc's `itemId` head
+                              //     field so the doc knows which
+                              //     itemsGroup row points at it,
+                              //   - patches the itemsGroup row's
+                              //     `details.experienceId` to the ILE's
+                              //     `_id`,
+                              //   - commits both in one Mongo
+                              //     transaction so the pointer
+                              //     can't drift.
+                              //
+                              // The auth check is "caller owns the ILE",
+                              // not "caller has course-level write
+                              // permission" — the previous direct
+                              // PATCH to /api/courses/.../items/...
+                              // required the course write role and
+                              // returned 500 / 403 for any teacher
+                              // who wasn't an instructor in the course.
+                              //
+                              // No copy is made. The teacher keeps the
+                              // ILE they authored; the section just
+                              // gains a pointer to it.
                               if (
                                 !courseId ||
                                 !versionId ||
@@ -3461,52 +3615,22 @@ function TeacherCourseContent() {
                                 return;
                               }
                               try {
-                                const token = localStorage.getItem(
-                                  "firebase-auth-token",
-                                );
-                                const res = await fetch(
-                                  `/api/courses/${courseId}/versions/${versionId}/items/${selectedEntity.data._id}`,
+                                await linkIleToItem(
+                                  picked.experienceId,
                                   {
-                                    method: "PUT",
-                                    credentials: "include",
-                                    headers: {
-                                      "Content-Type": "application/json",
-                                      ...(token
-                                        ? {
-                                            Authorization: `Bearer ${token}`,
-                                          }
-                                        : {}),
-                                    },
-                                    body: JSON.stringify({
-                                      type: "INTERACTIVE_EXPERIENCE",
-                                      name:
-                                        selectedItem.name ||
-                                        selectedEntity.data.name ||
-                                        "Interactive Experience",
-                                      description:
-                                        "Interactive learning experience",
-                                      ileDetails: {
-                                        experienceId: picked.experienceId,
-                                        status: picked.status,
-                                        currentVersion: picked.currentVersion,
-                                        updatedAt: picked.updatedAt,
-                                      },
-                                    }),
+                                    courseId,
+                                    courseVersionId: versionId,
+                                    itemId: selectedEntity.data._id,
                                   },
                                 );
-                                if (!res.ok) {
-                                  throw new Error(
-                                    `Link failed: ${res.status} ${res.statusText}`,
-                                  );
-                                }
-                                // Update the in-memory selected entity so
-                                // the inline view picks up the new
+                                // Update the in-memory selectedEntity
+                                // so the inline view picks up the new
                                 // experienceId on the next render. The
-                                // section tree refetch below also pushes
-                                // the new pointer into the itemsGroup
-                                // backing this row.
+                                // section tree refetch below also
+                                // pushes the new pointer into the
+                                // itemsGroup backing this row.
                                 setSelectedEntity({
-                                  type: "item",
+                                  type: 'item',
                                   data: {
                                     ...selectedEntity.data,
                                     details: {
@@ -3522,13 +3646,36 @@ function TeacherCourseContent() {
                                 refetchVersion();
                                 if (shouldFetchItems) refetchItems();
                               } catch (err) {
-                                // Surface via toast if available —
-                                // the inline view shows the error in
-                                // the picker, but the user may have
-                                // navigated away.
+                                // Surface a kind-specific toast. The
+                                // ILE library flow may also surface
+                                // an error in the picker itself, so
+                                // the teacher can retry without
+                                // navigating away.
+                                if (err instanceof IleApiError) {
+                                  const friendly: Record<string, string> = {
+                                    forbidden:
+                                      "You don't own this experience — only its author can link it here.",
+                                    not_found:
+                                      'The experience you selected is no longer available.',
+                                    validation:
+                                      err.message ||
+                                      'Link failed — the saved item is in an unexpected state.',
+                                    auth: 'Your session expired. Sign in again and try linking the experience.',
+                                  };
+                                  const toastMessage =
+                                    friendly[err.kind] ??
+                                    `Link failed: ${err.message}`;
+                                  toast.error(toastMessage, { duration: 6000 });
+                                  throw err;
+                                }
+                                // Non-typed errors fall back to a
+                                // generic message + console.error so
+                                // the original toast behaviour
+                                // (which the user found confusing) is
+                                // preserved.
                                 // eslint-disable-next-line no-console
                                 console.error(
-                                  "[ILE] Link existing failed:",
+                                  '[ILE] Link existing failed:',
                                   err,
                                 );
                                 throw err;
@@ -3536,6 +3683,40 @@ function TeacherCourseContent() {
                             }}
                             onClose={() => {
                               setSelectedEntity(null);
+                            }}
+                            onDelete={async () => {
+                              // Delete the itemsGroup row via the existing
+                              // mutation. The ILE doc (if any) is left
+                              // in the library — its itemId field will
+                              // be stale but the doc itself stays
+                              // queryable. Cascade-delete is a future
+                              // enhancement.
+                              const itemIdToDelete =
+                                selectedEntity.data._id;
+                              const itemsGroupIdToDelete =
+                                selectedEntity.parentIds?.itemsGroupId;
+                              if (!courseId || !versionId || !itemsGroupIdToDelete) {
+                                return;
+                              }
+                              try {
+                                await deleteItemAsync({
+                                  params: {
+                                    path: {
+                                      courseId: courseId,
+                                      itemsGroupId: itemsGroupIdToDelete,
+                                      itemId: itemIdToDelete,
+                                    },
+                                  },
+                                });
+                                setSelectedEntity(null);
+                                refetchVersion();
+                                if (shouldFetchItems) refetchItems();
+                                toast.success('Item deleted.');
+                              } catch (err: any) {
+                                toast.error(
+                                  err?.message ?? 'Failed to delete item.',
+                                );
+                              }
                             }}
                           />
                         )}
@@ -3844,8 +4025,9 @@ function TeacherCourseContent() {
       <IleWorkspaceDialog
         open={ileWorkspaceOpen}
         onOpenChange={setIleWorkspaceOpen}
-        experienceId={undefined}
+        experienceId={ileCourseContext?.experienceId}
         defaults={ileCourseContext ?? undefined}
+        itemsGroupItemId={ileCourseContext?.itemsGroupItemId}
       />
     </ResizablePanelGroup>
   );

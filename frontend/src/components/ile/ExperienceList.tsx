@@ -106,7 +106,7 @@ export function ExperienceList({
           <div className="min-w-0">
             <h1 className="flex items-center gap-2 text-base font-semibold text-foreground ">
               <Sparkles className="h-4 w-4 text-primary" />
-              Interactive Learning Experiences
+              Interactive Experiences
             </h1>
             <p className="mt-0.5 text-xs text-muted-foreground ">
               Every experience you've authored — drafts, published, archived.

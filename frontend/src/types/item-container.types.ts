@@ -9,6 +9,13 @@ export interface Item {
   type: string;
   order?: string;
   isCompleted?: boolean;
+  /**
+   * Whether the feedback form (rendered for Project items) is
+   * optional. Stored on the itemsGroup row by the project's
+   * `submitFeedback` toggle. Defaults to false at call sites that
+   * don't set it.
+   */
+  isOptional?: boolean;
   details?: {
     points?: string;
 
@@ -49,6 +56,18 @@ export interface Item {
     // For Project
     title?: string;
     description?: string;
+    /** react-json-schema-form schema for the project's FeedbackForm. */
+    jsonSchema?: unknown;
+    /** Optional uiSchema for the project's FeedbackForm. */
+    uiSchema?: Record<string, unknown>;
+
+    // For InteractiveExperience (ILE) — the itemsGroup row's pointer
+    // shape. Saved by the backend `IleService.saveAndSync` +
+    // `linkItem` in the same transaction as the ILE doc save.
+    // experienceId is the ILE doc's _id; status mirrors the ILE
+    // doc's status (draft | published | archived).
+    experienceId?: string;
+    status?: 'draft' | 'published' | 'archived';
   };
   isAlreadyWatched?: boolean;
 }
@@ -83,7 +102,7 @@ export interface ItemContainerProps {
   completedItemIdsRef: React.RefObject<Set<string>>;
   nextItem: {itemId:string};
   cohortId?: string;
-  cohortname?: string;
+  cohortName?: string;
   previousItem?: object;
   pendingStudentQuestionContext?: PendingStudentQuestionContext | null;
   clearPendingStudentQuestionContext?: () => void;

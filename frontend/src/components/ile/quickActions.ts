@@ -10,7 +10,6 @@ import {
   Accessibility,
   Smartphone,
   Palette,
-  Clock4,
   GitBranch,
   ListOrdered,
   Workflow,
