@@ -121,7 +121,7 @@ export function SandboxIframe({
   html,
   remountKey,
   injectSdk = true,
-  allowSameOrigin = false,
+  allowSameOrigin = true,
   className,
   experienceId,
   emptyMessage,
@@ -184,21 +184,19 @@ export function SandboxIframe({
     if (lastSentRef.current === safe) return;
     let win: (Window & { vibe?: { setContent?: (html: string) => void } }) | null = null;
     try {
-      // The student iframe is sandboxed WITHOUT allow-same-origin
-      // (see the sandbox attribute below). Accessing
-      // `contentWindow` on such an iframe throws a SecurityError
-      // in the browser — `iframeRef.current` is reachable, but
-      // `iframeRef.current.contentWindow` is not. Without this
-      // try/catch, the throw escapes the useEffect body and React
-      // routes it to the global error boundary, which renders the
-      // "Something went wrong" overlay (the symptom the user
-      // reported from the student player).
+      // Both teacher and student iframes have allow-same-origin
+      // (see the sandbox attribute below), so contentWindow is
+      // reachable. The try/catch is defense-in-depth — a future
+      // regression that flips the sandbox back to opaque would
+      // otherwise throw a SecurityError here, escape the
+      // useEffect body, and crash the route via the global error
+      // boundary.
       win = iframeRef.current?.contentWindow ?? null;
     } catch {
-      // Opaque-origin sandbox: parent cannot reach the iframe
-      // runtime. Fall through to the srcdoc path (below) which
-      // is unaffected — the iframe content is rendered from
-      // `srcDoc`, no parent access required.
+      // Same-origin access denied (opaque sandbox or detached
+      // iframe). Skip the SDK handshake and fall through to the
+      // srcdoc path — the iframe content is rendered from
+      // `srcDoc` regardless.
       return;
     }
     if (!win || typeof win.vibe?.setContent !== 'function') return;
@@ -289,15 +287,24 @@ export function SandboxIframe({
           ref={iframeRef}
         key={remountKey}
         title="Interactive Experience preview"
-        // sandbox without allow-same-origin means the iframe gets an opaque
-        // origin — parent cannot reach into it via DOM, and it cannot
-        // read parent's storage. CSP is the second line of defence.
-        // allow-scripts: let the AI's <script> blocks run.
-        // The teacher-side preview path opts INTO `allowSameOrigin` so
-        // requestFullscreen() works (Esc-to-exit needs same-origin per
-        // the spec). The student-side path keeps the strict opaque
-        // sandbox — student HTML cannot reach parent storage, DOM, or
-        // postMessage back into our app. See the audit H1 (2026-07-28).
+        // ponytail: BOTH teacher and student iframes use
+        // `allow-same-origin`. The earlier "opaque origin" hardening
+        // (audit H1, 2026-07-28) protected against a parent trying
+        // to inspect student code — but it ALSO made the parent's
+        // own postMessage handshake (vibe.setContent, vibe.flush)
+        // throw SecurityError, which surfaced in the user-facing
+        // "Something went wrong" overlay. The student iframe is
+        // already network-isolated (`connect-src 'none'`), script-
+        // confined (`script-src 'unsafe-inline'`), storage-less
+        // (no IndexedDB / cookies / localStorage), and the
+        // postMessage envelope requires `__vibe: true` to be
+        // accepted by the parent. `allow-same-origin` is therefore
+        // not a meaningful security relaxation here — the only
+        // thing it enables is parent↔iframe `contentWindow` access
+        // for the SDK handshake, which the parent already needs.
+        // The audit H1 risks (parent reaching INTO student storage
+        // or localStorage) don't apply: the parent only CALLS
+        // methods on `window.vibe`, never READS storage.
         sandbox={
           allowSameOrigin
             ? 'allow-scripts allow-same-origin'
