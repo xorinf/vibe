@@ -186,7 +186,15 @@ class IleAssetListItem {
 
 @OpenAPI({ tags: ['Interactive Experiences'] })
 @JsonController('/interactive-experiences')
-@Authorized()
+// ponytail: removed class-level @Authorized() so the public student
+// endpoints (/:id/play, /:id/events, /csp-report) can be reached
+// without a Firebase token. The student-on-play path was broken:
+// routing-controllers 0.11.x propagates the class-level decorator
+// to every method, so even when the method had no @Authorized() of
+// its own, the class-level one still gated access. The student
+// endpoint hit AuthorizationRequiredError on the way in. Each
+// method that needs auth now has an explicit @Authorized()
+// decorator at the top of its method — search for it.
 export class IleController {
   constructor(
     @inject(ILE_TYPES.IleGenerationService)
@@ -213,6 +221,7 @@ export class IleController {
    * a boolean so the UI can render the "Not Configured" state without
    * having to check for null fields.
    */
+  @Authorized()
   @Get('/config')
   @OpenAPI({ summary: 'Fetch the ILE AI configuration for the current owner.' })
   @ResponseSchema(IleAiConfigStatusResponse)
@@ -256,6 +265,7 @@ export class IleController {
    * workflow, which the empty-apiKey-preserves-prior-key rule made
    * impossible from the UI.
    */
+  @Authorized()
   @Delete('/config')
   @HttpCode(204)
   @OpenAPI({ summary: 'Delete the ILE AI configuration for the current owner.' })
@@ -271,6 +281,7 @@ export class IleController {
    * Returns a stable four-state status: connected / invalid_key /
    * network_error / not_configured.
    */
+  @Authorized()
   @Post('/config/test')
   @HttpCode(200)
   @OpenAPI({ summary: 'Test the ILE AI configuration.' })
@@ -306,6 +317,7 @@ export class IleController {
    * Multipart upload. Field name is `file`; the `kind` field tells
    * the server which mimetype + size limits to enforce.
    */
+  @Authorized()
   @Post('/assets/upload')
   @HttpCode(201)
   @OpenAPI({ summary: 'Upload an asset (image/audio/video/pdf/svg/markdown).' })
@@ -360,6 +372,7 @@ export class IleController {
    * List the teacher's assets, newest first. Supports ?kind= and ?q=
    * for filtering. Capped at 200 entries server-side.
    */
+  @Authorized()
   @Get('/assets')
   @OpenAPI({ summary: 'List the current owner\u2019s assets.' })
   async listAssets(
@@ -388,6 +401,7 @@ export class IleController {
    * Returns a fresh signed URL for the asset. Frontend re-fetches
    * before each generation to avoid stale-URL issues.
    */
+  @Authorized()
   @Get('/assets/:id/signed')
   @OpenAPI({ summary: 'Get a fresh signed URL for an asset.' })
   async getAssetSignedUrl(
@@ -402,6 +416,7 @@ export class IleController {
    * DELETE /assets/:id
    * Soft-removes the asset from Mongo and hard-deletes the GCS blob.
    */
+  @Authorized()
   @Delete('/assets/:id')
   @HttpCode(204)
   @OpenAPI({ summary: 'Delete an asset (owner only).' })
@@ -495,6 +510,7 @@ export class IleController {
    * engagement. The teacher dashboard uses this to render the new
    * "Analytics" tab in the workspace.
    */
+  @Authorized()
   @Get('/:id/analytics')
   @OpenAPI({ summary: 'Teacher view: per-experience student analytics.' })
   async getExperienceAnalytics(
@@ -516,6 +532,7 @@ export class IleController {
    * a list of experience ids; we return per-experience analytics
    * plus cohort-level totals.
    */
+  @Authorized()
   @Get('/analytics/dashboard')
   @OpenAPI({ summary: 'Teacher view: dashboard across multiple experiences.' })
   async getDashboard(
@@ -552,6 +569,7 @@ export class IleController {
    * query params (ISO date strings) bound the window; otherwise the
    * last 30 days.
    */
+  @Authorized()
   @Get('/:id/analytics/timeseries')
   @OpenAPI({ summary: 'Teacher view: daily time series for one experience.' })
   async getTimeSeries(
@@ -574,6 +592,7 @@ export class IleController {
    * the largest single-bin drop so the AI insights layer can flag a
    * "confusing section" without re-scanning.
    */
+  @Authorized()
   @Get('/:id/analytics/dropoff')
   @OpenAPI({ summary: 'Teacher view: drop-off curve (10% bins) for one experience.' })
   async getDropOff(
@@ -591,6 +610,7 @@ export class IleController {
    * a list of insights with severity, scope (progress range), and a
    * suggested action. The dashboard renders each as a card.
    */
+  @Authorized()
   @Get('/:id/analytics/insights')
   @OpenAPI({ summary: 'Teacher view: AI insights for one experience.' })
   async getInsights(
@@ -607,6 +627,7 @@ export class IleController {
    * Compare A vs B. Both experiences must be owned by the same
    * teacher (the ile.getOwned checks above enforce it independently).
    */
+  @Authorized()
   @Get('/analytics/compare')
   @OpenAPI({ summary: 'Teacher view: compare A vs B across headline metrics.' })
   async compare(
@@ -637,6 +658,7 @@ export class IleController {
    * Stream a fresh generation. SSE over POST (because Anthropic prompts
    * can be long and GETs would need query encoding).
    */
+  @Authorized()
   @Post('/generate/stream')
   @OpenAPI({
     summary: 'Stream a fresh interactive experience generation',
@@ -679,6 +701,7 @@ export class IleController {
    * 'Preparing context...' / 'Understanding the learning material...' /
    * 'Generating interactive experience...' / 'Done'.
    */
+  @Authorized()
   @Post('/generate/from-context/stream')
   @OpenAPI({
     summary: 'Stream a fresh interactive experience generation from external context',
@@ -715,6 +738,7 @@ export class IleController {
   /**
    * Stream a conversational edit on an existing experience.
    */
+  @Authorized()
   @Post('/:id/edit/stream')
   @OpenAPI({
     summary: 'Stream a conversational edit of an existing experience',
@@ -786,6 +810,7 @@ export class IleController {
    * still hit this endpoint. New versions of the frontend prefer
    * `/:id/save` which has the same shape but explicit version semantics.
    */
+  @Authorized()
   @Post('/')
   @ResponseSchema(IleExperienceResponse)
   @OpenAPI({ summary: 'Save or update an experience (teacher-owned)' })
@@ -813,6 +838,7 @@ export class IleController {
    * even if the HTML is unchanged. Identical response to POST /, but the
    * route makes the version-snapshot intent explicit at the call site.
    */
+  @Authorized()
   @Post('/:id/save')
   @ResponseSchema(IleExperienceResponse)
   @OpenAPI({ summary: 'Versioned save — append a new version snapshot.' })
@@ -857,6 +883,7 @@ export class IleController {
    * fit cleanly in a class-validator decorator — e.g. "the
    * experienceId pointer must be a valid ObjectId when provided".
    */
+  @Authorized()
   @Post('/save-with-item')
   @ResponseSchema(SaveWithItemResponse)
   @OpenAPI({
@@ -952,6 +979,7 @@ export class IleController {
    * the caller doesn't own the ILE — we re-throw it here so
    * routing-controllers maps it to a 403.
    */
+  @Authorized()
   @Post('/:id/link-item')
   @ResponseSchema(SaveWithItemResponse)
   @OpenAPI({
@@ -982,6 +1010,7 @@ export class IleController {
   /**
    * Teacher fetches a draft.
    */
+  @Authorized()
   @Get('/:id')
   @ResponseSchema(IleExperienceResponse)
   @OpenAPI({ summary: 'Fetch an experience (teacher owner only)' })
@@ -999,6 +1028,7 @@ export class IleController {
    * List the teacher's experiences (most-recent first, archived excluded
    * by default). Drives the ILE manager / history UI.
    */
+  @Authorized()
   @Get('/')
   @ResponseSchema(class { experiences: IleExperienceListItem[] })
   @OpenAPI({ summary: 'List the current owner\u2019s experiences.' })
@@ -1016,6 +1046,7 @@ export class IleController {
   /**
    * List version history for an experience (newest first).
    */
+  @Authorized()
   @Get('/:id/versions')
   @ResponseSchema(class { versions: IleVersionListItem[] })
   @OpenAPI({ summary: 'List version history for an experience.' })
@@ -1039,6 +1070,7 @@ export class IleController {
   /**
    * Fetch a specific version (full HTML + prompt).
    */
+  @Authorized()
   @Get('/:id/versions/:version')
   @ResponseSchema(IleVersionDetailResponse)
   @OpenAPI({ summary: 'Fetch a single version (full HTML).' })
@@ -1061,6 +1093,7 @@ export class IleController {
    * the editor an authoritative fetch path so the chat thread survives
    * workspace remounts and version restores.
    */
+  @Authorized()
   @Get('/:id/history')
   @OpenAPI({ summary: 'Fetch the chat history for an experience.' })
   async getHistory(
@@ -1077,6 +1110,7 @@ export class IleController {
    * Restore a previous version. Creates a NEW version snapshot whose
    * contents come from the target — history stays append-only.
    */
+  @Authorized()
   @Post('/:id/versions/:version/restore')
   @ResponseSchema(IleExperienceResponse)
   @OpenAPI({ summary: 'Restore a previous version.' })
@@ -1100,6 +1134,7 @@ export class IleController {
    * Rename — only the title field. Lives on its own endpoint so future
    * field-level mutations don't tangle with the versioned Save path.
    */
+  @Authorized()
   @Patch('/:id')
   @ResponseSchema(IleExperienceResponse)
   @OpenAPI({ summary: 'Rename an experience (title only).' })
@@ -1119,6 +1154,7 @@ export class IleController {
    * teacher lands on the copy so they can iterate without touching the
    * original.
    */
+  @Authorized()
   @Post('/:id/duplicate')
   @ResponseSchema(IleExperienceResponse)
   @HttpCode(201)
@@ -1138,6 +1174,7 @@ export class IleController {
    * stamped. The experience stops appearing for students immediately.
    * The owner can still see it via `?includeArchived=true`.
    */
+  @Authorized()
   @Post('/:id/archive')
   @ResponseSchema(IleExperienceResponse)
   @OpenAPI({ summary: 'Archive an experience (soft delete).' })
@@ -1155,6 +1192,7 @@ export class IleController {
    * Unarchive — restore to draft. The teacher must re-publish explicitly
    * afterwards; we don't auto-restore the published flag.
    */
+  @Authorized()
   @Post('/:id/unarchive')
   @ResponseSchema(IleExperienceResponse)
   @OpenAPI({ summary: 'Unarchive an experience (restore to draft).' })
@@ -1173,6 +1211,7 @@ export class IleController {
    * teacher doesn't own the resource. Idempotent — re-deleting an
    * already-archived experience still returns 204.
    */
+  @Authorized()
   @Delete('/:id')
   @HttpCode(204)
   @OpenAPI({ summary: 'Soft-delete an experience (archive).' })
@@ -1189,6 +1228,7 @@ export class IleController {
   /**
    * Publish an experience so students can play it.
    */
+  @Authorized()
   @Post('/:id/publish')
   @ResponseSchema(IleExperienceResponse)
   @OpenAPI({ summary: 'Publish an experience (teacher owner only)' })
