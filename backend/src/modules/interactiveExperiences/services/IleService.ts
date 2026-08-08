@@ -432,8 +432,16 @@ export class IleService extends BaseService {
   }
 
   /**
-   * For student playback we only return published (and non-archived)
-   * experiences, and we intentionally omit the chat history.
+   * For student playback we return any non-archived experience that
+   * has actual HTML content. We intentionally omit the chat history.
+   *
+   * The previous version gated on `status === 'published'`; that
+   * silently broke the "teacher added an ILE item to a module
+   * section, student opens it, sees nothing" case because every
+   * fresh ILE ships as `draft` (insertFreshIle sets the default).
+   * The teacher adding the ILE to a section is the intent signal
+   * — a draft that's bound to a course item is meant to be played.
+   * Archived is still a hard gate (soft-deleted → not playable).
    */
   async getPublishedForStudent(
     id: string,
@@ -442,7 +450,10 @@ export class IleService extends BaseService {
     if (!doc) return null;
     // Archived → not playable, even if it was published before.
     if (doc.status === 'archived') return null;
-    if (doc.status !== 'published') return null;
+    // No content yet → nothing to render. Refusing here prevents the
+    // student from seeing a blank iframe and confusing it with a
+    // broken experience.
+    if (!doc.html || doc.html.trim() === '') return null;
     return {
       _id: doc._id,
       title: doc.title,

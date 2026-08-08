@@ -10,6 +10,7 @@ import {
   Home,
   Headphones,
   ExternalLink,
+  Sparkles,
 } from "lucide-react";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -29,6 +30,8 @@ const getItemIcon = (type: string) => {
     case "form":
     case "feedback":
       return <FileEdit className="h-3 w-3" />;
+    case "interactive_experience":
+      return <Sparkles className="h-3 w-3" />;
     default:
       return <FileText className="h-3 w-3" />;
   }
@@ -51,6 +54,8 @@ const typeLabel = (type: string) => {
       return "Feedback";
     case "project":
       return "Project";
+    case "interactive_experience":
+      return "Interactive Experience";
     default:
       return type || "Item";
   }
