@@ -120,13 +120,30 @@ export function useIleContextGeneration(): UseIleContextGenerationApi {
               status: 'error',
               error: ev.message,
             };
+          default:
+            // ponytail: unknown event kind — return `prev` instead
+            // of `undefined`. React 18 treats an undefined return
+            // from a setState updater as a request to set state to
+            // undefined, which causes downstream reads like
+            // `contextStream.state.status` to throw. Returning prev
+            // is a no-op (React bails out of the re-render) and
+            // keeps the state shape intact.
+            return prev;
         }
       });
     };
 
-    const cancel = streamIleGenerationFromContext(args, onEvent);
+    const controller = new AbortController();
+    const cancel = streamIleGenerationFromContext(args, onEvent, {
+      signal: controller.signal,
+    });
     cancelRef.current = () => {
       clearTimeout(watchdog);
+      try {
+        controller.abort();
+      } catch {
+        // already aborted
+      }
       cancel();
     };
     return cancel;

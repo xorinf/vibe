@@ -517,6 +517,15 @@ export function useIleEditor(): UseIleEditorApi {
                 reasoning: false,
               };
             }
+            default:
+              // ponytail: unknown event kind — return `base` instead
+              // of `undefined`. React 18 treats an undefined return
+              // from a setState updater as a request to set state to
+              // undefined, which causes downstream reads like
+              // `streamState.status` to throw and breaks the editor.
+              // Returning `base` is a no-op (React bails out of the
+              // re-render) and keeps the state shape intact.
+              return base;
           }
         });
       };

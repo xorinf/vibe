@@ -914,7 +914,7 @@ export function TeacherILEWorkspace({
                 itemId,
               });
             }}
-            contextDisabled={contextStream.state.status === 'streaming'}
+            contextDisabled={contextStream?.state?.status === 'streaming'}
             composerHidden={!isConfigured}
             configHint={
               configState === 'loading'
