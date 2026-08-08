@@ -57,6 +57,16 @@ export interface StudentPlayerChromeProps {
   showCopyLink?: boolean;
   /** Show an "exit / resume lesson" affordance. Routed-only. */
   onExit?: () => void;
+  /**
+   * Inline-only: called when the student clicks the
+   * "Resume Lesson" button after completing the ILE. The
+   * inline view's parent (ItemContainer) wires this to the
+   * course page's `onNext` so the student advances to the
+   * next item. Distinguished from `onExit` (which is for
+   * mid-experience bail-outs) so the chrome can render a
+   * different "Done" label on the completion path.
+   */
+  onCompleteAdvance?: () => void;
   /** Iframe (or any other) body — replaces the chrome body. */
   children: ReactNode;
   className?: string;
@@ -78,6 +88,7 @@ export function StudentPlayerChrome({
   showCoach = true,
   showCopyLink = true,
   onExit,
+  onCompleteAdvance,
   children,
   className,
 }: StudentPlayerChromeProps) {
@@ -181,7 +192,19 @@ export function StudentPlayerChrome({
         </div>
 
         <div className="flex items-center gap-1">
-          {completed && onExit && (
+          {completed && onCompleteAdvance && (
+            <Button
+              size="lg"
+              variant="secondary"
+              onClick={onCompleteAdvance}
+              className="gap-1 bg-emerald-500/20 text-emerald-200 hover:bg-emerald-500/30"
+              data-testid="ile-completion-advance"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Done
+            </Button>
+          )}
+          {completed && onExit && !onCompleteAdvance && (
             <Button
               size="lg"
               variant="secondary"
@@ -289,7 +312,7 @@ export function StudentPlayerChrome({
       </div>
 
       {/* Body */}
-      <div className={cn('relative flex-1', isDark ? 'bg-background ' : 'bg-background ')}>
+      <div className={cn('relative flex-1', isDark ? 'bg-stage ' : 'bg-stage ')}>
         {loading && (
           <LoadingOverlay message={emptyMessage} />
         )}

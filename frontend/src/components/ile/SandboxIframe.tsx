@@ -446,7 +446,13 @@ function wrapWithSandbox(
   // missing it, which is why a "simple hello" ILE rendered as a black
   // page with no visible text.
   const stageFg = parentTheme === 'dark' ? 'hsl(220 16% 97%)' : 'hsl(230 25% 12%)';
-  const defaultBodyStyle = `<style>html,body{height:100%;margin:0;background:${stageBg};color:${stageFg}}@media (prefers-color-scheme:dark){html:not(.light){background:hsl(230 20% 7%);color:hsl(220 16% 97%)}}@media (prefers-color-scheme:light){html:not(.dark){background:hsl(220 16% 95%);color:hsl(230 25% 12%)}}</style>`;
+  const // Only the base rule — no @media arms-race. The AI's own
+  // html,body { background: ... } rule will outrank this by source
+  // order (the AI's <style> appears later in the document). The @media
+  // arms-race (html:not(.light) at (0,1,1) vs html,body at (0,0,1))
+  // reliably hid the AI's content in dark mode. The blank-doc path
+  // (makeBlankDoc) keeps its own full dark/light handling.
+  defaultBodyStyle = `<style>html,body{height:100%;margin:0;background:${stageBg};color:${stageFg}}</style>`;
 
   // Substitute the placeholder with the real experience id (or '' if
   // not bound yet). The empty string is a safe default because the
@@ -458,42 +464,20 @@ function wrapWithSandbox(
       )
     : '';
 
-  // ponytail: pin the iframe to "light" so the wrapper's
-  // @media (prefers-color-scheme: dark) html:not(.light) rule
-  // doesn't elevate over the AI's own CSS. Without this, a
-  // student with a dark OS sees the iframe body painted black
-  // (the wrapper's dark stage bg has higher specificity than
-  // the AI's html,body rule) and the AI's gradient / content
-  // never renders. The AI's own stylesheet can still override
-  // by adding !important or by using a more specific selector
-  // if it really wants light mode — this is just the default.
-  // addLightClass rewrites the existing <html ...> tag to
-  // include class="light" alongside whatever the AI set.
-  const addLightClass = (html) =>
-    html.replace(/<html\s+([^>]*)>/i, (_m, attrs) => {
-      // If the AI already set class="..." keep it AND add light.
-      if (/class\s*=/i.test(attrs)) {
-        return `<html ${attrs.replace(/class\s*=\s*["']([^"']*)["']/i, (m, c) =>
-          /\b\s*light\s*\b/i.test(c) ? m : `class="${c} light"`) }>`;
-      }
-      return `<html ${attrs} class="light">`;
-    });
-
   if (/<head[\s>]/i.test(body)) {
     body = body.replace(
       /<head([^>]*)>/i,
       `<head$1>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}`,
     );
-    body = addLightClass(body);
   } else {
     // Insert a head before <html>'s body, or prepend one if no html tag.
     if (/<html[\s>]/i.test(body)) {
       body = body.replace(
         /<html([^>]*)>/i,
-        `<html$1 class="light"><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>`,
+        `<html$1><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>`,
       );
     } else {
-      body = `<html class="light"><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>${body}`;
+      body = `<html><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>${body}`;
     }
   }
 
