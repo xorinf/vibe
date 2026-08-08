@@ -397,71 +397,31 @@ function wrapWithSandbox(
   injectSdk: boolean,
   experienceId?: string,
 ): string {
-  // The AI emits a full <!DOCTYPE html> document. If it didn't
-  // (e.g. partial fragment in early drafts), wrap it so the iframe still
-  // parses cleanly.
-  let body = html;
-  const hasDoctype = /^\s*<!doctype\s+html/i.test(body);
-  const hasHtml = /<html[\s>]/i.test(body);
-
-  if (!hasDoctype || !hasHtml) {
-    body = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${body}</body></html>`;
-  }
-
-  // Inject CSP + (optionally) the runtime SDK by rewriting the <head>.
-  // The CSP meta tag is built from IFRAME_CSP_META_TAG in vibeSdk.ts,
-  // which strips `report-uri` and `report-to` defensively.
-  const cspMeta = IFRAME_CSP_META_TAG;
-
-  // The wrapper only sets height/color-scheme. The AI's own html,body
-  // rule provides the background — setting background here would
-  // either be higher-specificity (and dark in dark mode via a
-  // :not(.light) class guard) or paint the iframe body in a way that
-  // hides the AI's gradient. The pixel that "I just want a colored
-  // background for AI HTML that forgot to set one" is better solved
-  // by the makeBlankDoc fallback (the empty/error state) than by
-  // hijacking the AI's CSS surface.
-  const parentTheme =
-    typeof document !== 'undefined'
-      ? document.documentElement.classList.contains('dark')
-        ? 'dark'
-        : 'light'
-      : 'light';
-  const themeMeta = `<meta name="color-scheme" content="light dark">`;
-  const defaultBodyStyle = `<style>html,body{height:100%;margin:0}</style>`;
-
-  // Substitute the placeholder with the real experience id (or '' if
-  // not bound yet). The empty string is a safe default because the
-  // server falls back to the path parameter.
+  // ponytail: trust the AI's HTML. Inject CSP + SDK into the existing
+  // <head> if present, otherwise wrap in a minimal doc. The wrapper
+  // does NOT touch backgrounds, colors, or theme — the AI owns the
+  // visual surface. Prior revisions injected a stage background that
+  // hid the AI's gradient in dark mode; the wrapper now does the
+  // absolute minimum.
   const sdk = injectSdk
     ? VIBE_RUNTIME_SNIPPET.replace(
         '__VIBE_EXPERIENCE_ID_PLACEHOLDER__',
         experienceId ?? '',
       )
     : '';
+  const injected = `${IFRAME_CSP_META_TAG}${sdk}`;
 
-  if (/<head[\s>]/i.test(body)) {
-    body = body.replace(
-      /<head([^>]*)>/i,
-      `<head$1>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}`,
-    );
-  } else {
-    // Insert a head before <html>'s body, or prepend one if no html tag.
-    if (/<html[\s>]/i.test(body)) {
-      body = body.replace(
-        /<html([^>]*)>/i,
-        `<html$1><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>`,
-      );
-    } else {
-      body = `<html><head>${cspMeta}${themeMeta}${defaultBodyStyle}${sdk}</head>${body}`;
-    }
+  if (/<head[\s>]/i.test(html)) {
+    return html.replace(/<head([^>]*)>/i, `<head$1>${injected}`);
   }
-
-  return body;
+  if (!/<\s*!doctype/i.test(html)) {
+    return `<!DOCTYPE html><html><head>${injected}</head><body>${html}</body></html>`;
+  }
+  return `<html><head>${injected}</head><body>${html}</body></html>`;
 }
 
 
- The AI-generated HTML may include its own
+// ponytail: defensive. The AI-generated HTML may include its own
 // <meta http-equiv="Content-Security-Policy"> tag with a `report-uri`
 // directive. CSP's `report-uri` is ignored in <meta> tags per the
 // spec, and the browser emits a console warning every time it
