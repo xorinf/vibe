@@ -176,50 +176,18 @@ export function SandboxIframe({
     );
   }, [html, injectSdk, experienceId, emptyMessage]);
 
-  // Live update: when `html` changes AFTER the iframe has booted, prefer
-  // the runtime's `vibe.setContent` over a srcdoc remount. This keeps
-  // any in-flight runtime state (autoplaying audio, animation frame
-  // index, scroll position outside the swapped content) intact.
-  //
-  // We only do this when the SDK is injected (student-side) and the
-  // html is non-empty. For the teacher preview (injectSdk={false})
-  // and the blank-state doc, fall through to the srcdoc path.
-  useEffect(() => {
-    const safe = html ?? '';
-    if (!injectSdk) return;
-    if (!safe.trim()) return;
-    if (!loaded) return;
-    if (lastSentRef.current === safe) return;
-    let win: (Window & { vibe?: { setContent?: (html: string) => void } }) | null = null;
-    try {
-      // Both teacher and student iframes have allow-same-origin
-      // (see the sandbox attribute below), so contentWindow is
-      // reachable. The try/catch is defense-in-depth — a future
-      // regression that flips the sandbox back to opaque would
-      // otherwise throw a SecurityError here, escape the
-      // useEffect body, and crash the route via the global error
-      // boundary.
-      win = iframeRef.current?.contentWindow ?? null;
-    } catch {
-      // Same-origin access denied (opaque sandbox or detached
-      // iframe). Skip the SDK handshake and fall through to the
-      // srcdoc path — the iframe content is rendered from
-      // `srcDoc` regardless.
-      return;
-    }
-    if (!win || typeof win.vibe?.setContent !== 'function') return;
-    try {
-      win.vibe.setContent(safe);
-      lastSentRef.current = safe;
-    } catch (err) {
-      // If the runtime threw (e.g. document.write blocked by CSP),
-      // fall through to the srcdoc path so the user still sees an
-      // update. We deliberately do NOT remount — the iframe is
-      // already in a usable state.
-      // eslint-disable-next-line no-console
-      console.warn('[SandboxIframe] vibe.setContent failed; falling back to srcdoc', err);
-    }
-  }, [html, loaded, injectSdk]);
+  // ponytail: live updates go through the srcdoc path (re-mount). The
+  // previous `vibe.setContent(html)` path called document.open() +
+  // document.write() which re-ran the AI's inline script and triggered
+  // "Identifier 'btn' has already been declared" SyntaxError on the
+  // second run (the AI's script declares `const btn = ...` at top
+  // level). The teacher view never hit this because it sets
+  // injectSdk={false} and bailed out of this effect entirely. The
+  // remount is cheap (the iframe is small) and avoids the double-declare.
+  // Remove this entire effect; the `srcdoc` prop on the iframe below
+  // is the single source of truth — React re-renders it when `html`
+  // changes.
+  void lastSentRef;
 
   // Listen for postMessage events from the sandboxed iframe.
   useEffect(() => {
