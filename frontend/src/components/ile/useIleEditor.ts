@@ -495,13 +495,28 @@ export function useIleEditor(): UseIleEditorApi {
                 reasoning: false,
                 truncated: ev.truncated ?? base.truncated,
               };
-            case 'error':
+            case 'error': {
+              // ponytail: cast 'kind' to the closed tunnel — the SSE
+              // payload is a string union (see ileApi.ts synthetic
+              // error path), but TS widens it to `string` because
+              // the union lives in the consumer. Assert the shape
+              // with a runtime guard so the typed field stays typed.
+              const errorKind = (ev as { kind?: string }).kind ?? '';
+              const allowedKinds = [
+                'auth', 'forbidden', 'not_found', 'server',
+                'network', 'cancelled', 'provider_output_not_html',
+                'unknown', '',
+              ] as const;
               return {
                 ...base,
                 status: 'error',
                 error: ev.message,
+                errorKind: (allowedKinds as readonly string[]).includes(errorKind)
+                  ? errorKind as typeof allowedKinds[number]
+                  : '',
                 reasoning: false,
               };
+            }
           }
         });
       };

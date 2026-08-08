@@ -242,13 +242,17 @@ export function TeacherILEWorkspace({
     };
   }, [editorState.stream.status, editorState.stream.experienceId]);
 
-  const lastTruncationRef = useRef<boolean>(false);
+  // ponytail: persist the truncation-acknowledged flag across
+  // remounts via sessionStorage so a teacher who re-opens an
+  // already-truncated doc doesn't see the toast again. Keyed by
+  // experienceId so different docs each get their own flag.
+  const lastTruncationKey = `vibe.ile.truncated.${editorState.stream.experienceId ?? 'pending'}`;
   useEffect(() => {
     const truncated = Boolean(editorState.stream.truncated);
-    const wasTruncated = lastTruncationRef.current;
-    lastTruncationRef.current = truncated;
-    if (!truncated || wasTruncated) return;
+    if (!truncated) return;
     if (editorState.stream.status !== 'done') return;
+    if (sessionStorage.getItem(lastTruncationKey) === '1') return;
+    sessionStorage.setItem(lastTruncationKey, '1');
     toast.warning(
       'The response was truncated by the provider. The saved draft is incomplete — try a shorter or more specific prompt.',
       { duration: 10_000 },
@@ -404,9 +408,22 @@ export function TeacherILEWorkspace({
   // AI is 'still working' forever when the backend rejected the
   // request (e.g. auth mismatch, validation failure).
   useEffect(() => {
-    if (editorState.stream.status === 'error' && editorState.stream.error) {
-      toast.error(editorState.stream.error, { duration: 8000 });
-    }
+    if (editorState.stream.status !== 'error' || !editorState.stream.error) return;
+    // ponytail: same kind taxonomy as the save error path so the
+    // teacher gets a friendly message for 401/403/404 instead of
+    // "Stream ended without a terminal event (HTTP 401)".
+    const kind = editorState.stream.errorKind ?? 'unknown';
+    const friendly: Record<string, string> = {
+      auth: 'Your session expired. Sign in again and try the action.',
+      forbidden: "You don't have permission to run this AI here.",
+      not_found: 'The stream target is missing. Refresh and retry.',
+      server: 'The ILE service is having trouble. Try again in a moment.',
+      network: "Can't reach the ILE service. Check your network and retry.",
+      cancelled: 'Generation cancelled.',
+      provider_output_not_html:
+        'The model returned prose instead of an HTML document. Try a more specific prompt.',
+    };
+    toast.error(friendly[kind] ?? editorState.stream.error, { duration: 8000 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editorState.stream.status, editorState.stream.error]);
 
@@ -803,7 +820,12 @@ export function TeacherILEWorkspace({
             size="sm"
             variant="ghost"
             onClick={handleSave}
-            disabled={saving || !effectiveHtml}
+            // ponytail: disable the save button when there's
+            // nothing dirty to save. isDirty is true only when the
+            // current editor state differs from the last successful
+            // save. After Save completes, `lastSavedAt` updates and
+            // isDirty flips back to false on the next render.
+            disabled={saving || !effectiveHtml || !isDirty}
             className="h-8 gap-1 px-2 text-xs text-muted-foreground  hover:text-accent-foreground"
             title="Save the current draft (Ctrl+S)"
             aria-label="Save draft"

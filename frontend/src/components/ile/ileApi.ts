@@ -266,12 +266,24 @@ function openIleSse(
       // "stalled" toast. Status 0 means the request never got a
       // response (network error before first byte).
       if (!sawTerminalEvent && !closed) {
-        const summary = wasNonOk
+        // ponytail: classify the upstream status into the same
+        // taxonomy the REST client uses so the UI can show a
+        // consistent friendly toast (e.g. "Your session expired.
+        // Sign in again..." for 401). Falls back to the raw status
+        // for unknown codes.
+        let kind: 'auth' | 'forbidden' | 'not_found' | 'server' | 'network' = 'server';
+        if (status === 401) kind = 'auth';
+        else if (status === 403) kind = 'forbidden';
+        else if (status === 404) kind = 'not_found';
+        else if (status === 0 || (status >= 500 && status < 600)) kind = 'server';
+        else if (status >= 400) kind = 'server';
+        if (!status) kind = 'network';
+        const message = wasNonOk
           ? `Server returned HTTP ${status} ${contentType ? `(${contentType.split(';')[0]})` : ''}`
           : status
             ? `Stream ended without a terminal event (HTTP ${status})`
             : 'Stream ended without a terminal event';
-        fire('error', summary);
+        fire('error', JSON.stringify({ message, kind }));
       }
     } catch (err) {
       if (closed) return;

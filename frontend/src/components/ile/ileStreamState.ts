@@ -33,6 +33,14 @@ export interface IleStreamState {
   /** Error message on `status === 'error'`. */
   error?: string;
   /**
+   * Error kind — populated when the error came from the upstream
+   * transport (REST or SSE) so the UI can show a friendly toast
+   * without re-classifying the raw message. Empty string when the
+   * error came from a client-side invariant (stream cancelled,
+   * socket dropped) rather than a server response.
+   */
+  errorKind?: 'auth' | 'forbidden' | 'not_found' | 'server' | 'network' | 'unknown' | 'cancelled' | 'provider_output_not_html' | '';
+  /**
    * Wall-clock time of the most recent HTML delta — lets the UI show a
    * "still working…" indicator if the stream stalls.
    */
