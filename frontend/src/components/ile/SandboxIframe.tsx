@@ -25,7 +25,7 @@
  * See `useIleEventReporter` for the host-side handler used by
  * the student player.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Component, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/utils/utils';
 import {
   IFRAME_CSP_META_TAG,
@@ -283,9 +283,10 @@ export function SandboxIframe({
   const showOverlay = hasHtml && !loaded;
 
   return (
-    <div className={cn('h-full w-full', className)}>
-      <iframe
-        ref={iframeRef}
+    <SandboxErrorBoundary>
+      <div className={cn('h-full w-full', className)}>
+        <iframe
+          ref={iframeRef}
         key={remountKey}
         title="Interactive Experience preview"
         // sandbox without allow-same-origin means the iframe gets an opaque
@@ -328,8 +329,49 @@ export function SandboxIframe({
           Booting experience…
         </div>
       )}
-    </div>
+      </div>
+    </SandboxErrorBoundary>
   );
+}
+
+/**
+ * ponytail: opaque-origin sandbox + same-origin parent is a recipe
+ * for SecurityError throws. A future regression (e.g. someone
+ * adds a new code path that forgets to guard contentWindow) would
+ * otherwise crash the entire route tree via the global error
+ * boundary. This local ErrorBoundary scopes any throw to JUST
+ * the iframe — the parent page keeps rendering the course tree,
+ * the back button, the navigation, etc. The error gets logged
+ * to console for diagnosis; the user sees a minimal "couldn't
+ * load this experience" message and can hit Reload.
+ */
+class SandboxErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  componentDidCatch(error: Error, info: { componentStack?: string }) {
+    // eslint-disable-next-line no-console
+    console.error('[SandboxIframe] swallowed error:', error, info);
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-full w-full items-center justify-center p-6 text-center text-sm text-muted-foreground">
+          <div>
+            <p className="font-medium">Couldn't load this experience.</p>
+            <p className="mt-2 text-xs">
+              The runtime hit a sandbox error. Try reloading the page.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
