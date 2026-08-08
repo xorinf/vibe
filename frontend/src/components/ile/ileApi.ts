@@ -797,9 +797,9 @@ async function patchJson<T>(
   opts?: IleCallOptions,
 ): Promise<T> {
   // PATCH is treated like POST for retry purposes — the ILE
-  // PATCH endpoints (archive, unarchive, restore) are not
+  // PATCH endpoints (rename, archive, unarchive, restore) are not
   // strictly idempotent but the server tolerates duplicates.
-  return defaultClient.put<T>(
+  return defaultClient.patch<T>(
     path,
     body,
     toClientOptions(opts, /* defaultIdempotent */ false),
