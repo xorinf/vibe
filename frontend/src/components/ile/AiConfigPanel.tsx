@@ -48,7 +48,7 @@ const PROVIDER_DEFAULTS: Record<
   },
   MiniMax: {
     defaultModel: 'MiniMax/MiniMax-M3',
-    defaultBaseUrl: 'https://api.MiniMax.com/v1',
+    defaultBaseUrl: 'https://api.minimax.com/anthropic',
   },
   openrouter: {
     defaultModel: 'openrouter/auto',

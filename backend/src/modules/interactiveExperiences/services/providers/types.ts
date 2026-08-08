@@ -32,7 +32,7 @@ export const PROVIDER_DEFAULTS: Record<
 // path for the M3 model (the OpenAI-compatible URL routes 4xx/empty
 // responses). Teachers who want the OpenAI-compat path can pick
 // `custom` and paste the URL themselves.
-MiniMax: {baseUrl: 'https://api.MiniMax.com/anthropic', defaultModel: 'MiniMax/MiniMax-M3'},
+MiniMax: {baseUrl: 'https://api.minimax.com/anthropic', defaultModel: 'MiniMax/MiniMax-M3'},
   openrouter: { baseUrl: 'https://openrouter.ai/api/v1', defaultModel: 'openrouter/auto' },
 };
 

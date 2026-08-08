@@ -44,7 +44,7 @@ describe('createProvider routing', () => {
       apiKey: 'sk-test',
       model: 'MiniMax/MiniMax-M3',
     } as any);
-    expect((provider as any).baseUrl).toBe('https://api.MiniMax.com/anthropic');
+    expect((provider as any).baseUrl).toBe('https://api.minimax.com/anthropic');
   });
 
   it('routes openai to OpenAICompatibleProvider', async () => {
