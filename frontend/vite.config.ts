@@ -24,9 +24,18 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // Proxy API requests to staging backend to avoid CORS issues
+      // Proxy API requests to the local backend.
+      // Default: `:3141` is the backend's own port (backend/.example.env
+      // `APP_PORT`). The Functions emulator wraps the backend on `:4001`
+      // per AGENTS.md but the local Firebase config
+      // (backend/firebase.json) only declares the auth emulator —
+      // override with VITE_API_PROXY=http://localhost:4001 when running
+      // the Functions emulator for parity with the documented workflow.
+      // Without this change, fresh dev setups hit ECONNREFUSED on
+      // /api/interactive-experiences/:id/play because the proxy target
+      // is empty.
       '/api': {
-        target: 'http://localhost:4001',
+        target: process.env.VITE_API_PROXY ?? 'http://localhost:3141',
         changeOrigin: true,
         secure: true,
       },
