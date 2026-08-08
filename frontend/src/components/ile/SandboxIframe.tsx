@@ -182,9 +182,25 @@ export function SandboxIframe({
     if (!safe.trim()) return;
     if (!loaded) return;
     if (lastSentRef.current === safe) return;
-    const win = iframeRef.current?.contentWindow as (Window & {
-      vibe?: { setContent?: (html: string) => void };
-    }) | null;
+    let win: (Window & { vibe?: { setContent?: (html: string) => void } }) | null = null;
+    try {
+      // The student iframe is sandboxed WITHOUT allow-same-origin
+      // (see the sandbox attribute below). Accessing
+      // `contentWindow` on such an iframe throws a SecurityError
+      // in the browser — `iframeRef.current` is reachable, but
+      // `iframeRef.current.contentWindow` is not. Without this
+      // try/catch, the throw escapes the useEffect body and React
+      // routes it to the global error boundary, which renders the
+      // "Something went wrong" overlay (the symptom the user
+      // reported from the student player).
+      win = iframeRef.current?.contentWindow ?? null;
+    } catch {
+      // Opaque-origin sandbox: parent cannot reach the iframe
+      // runtime. Fall through to the srcdoc path (below) which
+      // is unaffected — the iframe content is rendered from
+      // `srcDoc`, no parent access required.
+      return;
+    }
     if (!win || typeof win.vibe?.setContent !== 'function') return;
     try {
       win.vibe.setContent(safe);
@@ -220,12 +236,19 @@ export function SandboxIframe({
           // "Next") so the last 1-2 seconds of interaction events
           // don't sit in the queue when the iframe is unmounted.
           if (onFlushReady) {
-            const win = iframeRef.current?.contentWindow as
-              | (Window & { vibe?: { flushAnalytics?: () => void } })
-              | null;
+            let flushWin: (Window & { vibe?: { flushAnalytics?: () => void } }) | null = null;
+            try {
+              // Same opaque-sandbox concern as the setContent
+              // path above. The browser throws SecurityError on
+              // `contentWindow` access; swallow it so the global
+              // error overlay doesn't fire.
+              flushWin = iframeRef.current?.contentWindow ?? null;
+            } catch {
+              flushWin = null;
+            }
             const flush = () => {
               try {
-                win?.vibe?.flushAnalytics?.();
+                flushWin?.vibe?.flushAnalytics?.();
               } catch {
                 // Iframe may already be unmounted; best-effort.
               }
