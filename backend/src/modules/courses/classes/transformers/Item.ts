@@ -356,11 +356,20 @@ class IeItem {
     description: string,
     _id: ID,
     details?: IIeDetails,
+    // ponytail: ILE is skippable by default per product intent — the
+    // teacher can flip it to required via the Optional toggle in the
+    // inline view. The previous constructor dropped the incoming
+    // `isOptional` field, so POST /items with `isOptional: true` left
+    // the toggle stuck off after every refetch (the Mongo doc never
+    // carried the flag). Backed by the request body: the controller
+    // forwards body.isOptional straight into this arg via ItemBase.
+    isOptional: boolean = true,
   ) {
     this._id = _id;
     this.type = ItemType.INTERACTIVE_EXPERIENCE;
     this.name = name;
     this.description = description;
+    this.isOptional = isOptional;
     if (details) {
       this.details = details;
     }
@@ -447,6 +456,11 @@ class ItemBase {
           // the ILE doc on first save and patches the pointer back).
           // Read `itemBody.ileDetails` (not `details`) — earlier
           // revisions read `details` and silently dropped the field.
+          // Pass `isOptional` through so the persisted IeItem doc
+          // matches the toggle's initial state — the teacher view
+          // hydrates `isOptional` from this doc on refetch, and a
+          // dropped field here looks like an OFF toggle even though
+          // the create body said true.
           this.itemDetails = new IeItem(
             itemBody.name,
             itemBody.description,
@@ -457,11 +471,27 @@ class ItemBase {
               currentVersion: 0,
               updatedAt: Date.now(),
             },
+            itemBody.isOptional,
           );
           break;
         default:
           break;
       }
+    }
+
+    // ponytail: single assignment covers every item type's
+    // `isOptional` field — VIDEO / QUIZ / BLOG ctors never accepted
+    // the value, so a body-sent `isOptional: true` used to be
+    // silently dropped to the class-field default `false`. Project /
+    // Feedback / IeItem ctors take it (or, for IeItem, default true)
+    // but only IeItem gets it from `ItemBase` directly — the others
+    // need this fallback. Set ONCE here so all six types share one
+    // rule: `body.isOptional ?? per-type default`.
+    if (this.itemDetails) {
+      this.itemDetails.isOptional =
+        this.type === ItemType.INTERACTIVE_EXPERIENCE
+          ? (itemBody.isOptional ?? true)  // ILE: skippable by default
+          : !!itemBody.isOptional;         // others: only true if explicitly true
     }
 
     if (existingItems) {

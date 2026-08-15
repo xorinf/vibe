@@ -755,9 +755,17 @@ export class ItemService extends BaseService {
       }
 
       //  Update item first
+      // ponytail: `body.isOptional ?? item.isOptional` (NOT `||`).
+      // `||` silently keeps the prior value when the teacher toggles
+      // optional→required: `false || true` is `true`, so the Mongo
+      // doc keeps `isOptional: true` even though the request body
+      // said `false`. The PUT route is the only path the toggle uses
+      // for any non-ILE item, so this bug masks the
+      // "flip-video-from-skippable-to-required" path for every
+      // VIDEO / QUIZ / BLOG / PROJECT / FEEDBACK / ILE item.
       const result = await this.itemRepo.updateItem(
         itemId,
-        { ...body, isOptional: body.isOptional || item.isOptional },
+        { ...body, isOptional: body.isOptional ?? item.isOptional },
         session,
       );
 

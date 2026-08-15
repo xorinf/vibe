@@ -3889,9 +3889,14 @@ class ProgressService extends BaseService {
       throw new NotFoundError(`Item ${itemId} not found`);
     }
 
-    // if (item.isOptional !== true) {
-    //   throw new BadRequestError('Item is not marked as optional');
-    // }
+    // Guard: this endpoint must only mark `isOptional: true` items as
+    // complete. Previously commented out — the OpenAPI says it skips
+    // an *optional* item, but the implementation accepted any item,
+    // which let students mark required VIDEO / QUIZ / BLOG items as
+    // completed without doing them. Re-enabled.
+    if (item.isOptional !== true) {
+      throw new BadRequestError('Item is not marked as optional');
+    }
 
     // Get or create progress
 
