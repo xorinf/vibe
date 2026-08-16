@@ -1243,6 +1243,25 @@ export class IleController {
   }
 
   /**
+   * Inverse of publish: drop a published ILE back to draft. Used by the
+   * teacher's status pill — they should be able to set "draft" without
+   * round-tripping through archive.
+   */
+  @Authorized()
+  @Post('/:id/unpublish')
+  @ResponseSchema(IleExperienceResponse)
+  @OpenAPI({ summary: 'Unpublish an experience (teacher owner only)' })
+  async unpublish(
+    @Param('id') id: string,
+    @CurrentUser() user: IUser,
+  ): Promise<IleExperienceResponse> {
+    if (!user?._id) throw new BadRequestError('Authenticated user required');
+    const doc = await this.ile.unpublish(id, String(user._id));
+    if (!doc) throw new NotFoundError('Experience not found');
+    return this.toResponse(doc);
+  }
+
+  /**
    * Student-facing fetch — returns only published experiences and strips
    * the chat history.
    */

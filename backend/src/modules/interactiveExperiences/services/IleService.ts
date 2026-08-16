@@ -473,8 +473,46 @@ export class IleService extends BaseService {
     if (doc.ownerId !== ownerId) return null;
     if (doc.status === 'archived') return null;
     const now = new Date();
-    await this.repo.setStatus(id, 'published', { publishedAt: now });
-    return this.repo.findById(id);
+    const updated = await this._withTransaction(async (session) => {
+      await this.repo.setStatus(id, 'published', { publishedAt: now }, session);
+      // Mirror the status into the itemsGroup row when the ILE is
+      // bound to a course item — same shape `saveAndSync` writes.
+      // Without this the sidebar/status-pill on the teacher page
+      // shows the OLD status until the teacher does a content save.
+      const fresh = await this.repo.findById(id, session);
+      if (fresh && doc.itemId) {
+        await this.tryPatchItemsGroupPointer(doc.itemId, fresh, doc.title, session);
+      }
+      return fresh;
+    });
+    return updated;
+  }
+
+  /**
+   * Inverse of publish: drop a `published` ILE back to `draft` and clear
+   * the `publishedAt` timestamp. No direct route existed for this
+   * transition — teachers had to archive + unarchive, which round-tripped
+   * the item through a hidden state. Idempotent on a draft doc.
+   *
+   * Also mirrors the publish path: when the ILE is bound to a course
+   * item, the itemsGroup row's `ileDetails.status` mirror is updated
+   * in the same transaction so the sidebar pill flips immediately.
+   */
+  async unpublish(id: string, ownerId: string): Promise<IleExperience | null> {
+    const doc = await this.repo.findById(id);
+    if (!doc) return null;
+    if (doc.ownerId !== ownerId) return null;
+    if (doc.status === 'archived') return null;
+    if (doc.status === 'draft') return doc; // idempotent — no write
+    const updated = await this._withTransaction(async (session) => {
+      await this.repo.setStatus(id, 'draft', { publishedAt: null }, session);
+      const fresh = await this.repo.findById(id, session);
+      if (fresh && doc.itemId) {
+        await this.tryPatchItemsGroupPointer(doc.itemId, fresh, doc.title, session);
+      }
+      return fresh;
+    });
+    return updated;
   }
 
   async rename(id: string, ownerId: string, title: string): Promise<IleExperience | null> {

@@ -6,6 +6,8 @@ import {
   ArchiveRestore,
   Trash2,
   Edit3,
+  Send,
+  Undo2,
   Loader2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -15,8 +17,10 @@ import {
   archiveIleExperience,
   deleteIleExperience,
   duplicateIleExperience,
+  publishIleExperience,
   renameIleExperience,
   unarchiveIleExperience,
+  unpublishIleExperience,
 } from './ileApi';
 
 export interface ActionsMenuProps {
@@ -24,11 +28,24 @@ export interface ActionsMenuProps {
   currentTitle: string;
   isArchived: boolean;
   /**
+   * Whether the experience is currently `published`. Drives the
+   * Publish/Unpublish menu item. Pass `false` for drafts so the
+   * menu offers "Publish" instead of "Unpublish".
+   */
+  isPublished?: boolean;
+  /**
    * Fired after each lifecycle action. The parent uses this to refresh
    * its `saved` snapshot, navigate on duplicate, etc.
    */
   onAction: (
-    action: 'renamed' | 'duplicated' | 'archived' | 'unarchived' | 'deleted',
+    action:
+      | 'renamed'
+      | 'duplicated'
+      | 'archived'
+      | 'unarchived'
+      | 'published'
+      | 'unpublished'
+      | 'deleted',
     payload?: { newId?: string; newTitle?: string },
   ) => void;
   className?: string;
@@ -36,8 +53,9 @@ export interface ActionsMenuProps {
 
 /**
  * Top-right overflow menu in the Teacher Workspace. Surfaces the
- * lifecycle actions (Rename / Duplicate / Archive / Unarchive / Delete)
- * that don't deserve real-estate in the main action row.
+ * lifecycle actions (Rename / Duplicate / Archive / Unarchive / Publish /
+ * Unpublish / Delete) that don't deserve real-estate in the main
+ * action row.
  *
  * Self-contained — owns its dropdown open-state and the action handlers.
  * Closes itself after every successful action so the menu never lingers.
@@ -46,15 +64,21 @@ export function ActionsMenu({
   experienceId,
   currentTitle,
   isArchived,
+  isPublished = false,
   onAction,
   className,
 }: ActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [newTitle, setNewTitle] = useState(currentTitle);
-  const [busy, setBusy] = useState<'rename' | 'duplicate' | 'archive' | 'delete' | null>(
-    null,
-  );
+  const [busy, setBusy] = useState<
+    | 'rename'
+    | 'duplicate'
+    | 'archive'
+    | 'publish'
+    | 'delete'
+    | null
+  >(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Sync local rename input when current title changes (e.g. after
@@ -133,6 +157,34 @@ export function ActionsMenu({
       setOpen(false);
     } catch (err: any) {
       toast.error(err?.message ?? 'Unarchive failed.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handlePublish() {
+    setBusy('publish');
+    try {
+      await publishIleExperience(experienceId);
+      toast.success('Published — students can now play this experience.');
+      onAction('published');
+      setOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Publish failed.');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleUnpublish() {
+    setBusy('publish');
+    try {
+      await unpublishIleExperience(experienceId);
+      toast.success('Reverted to draft — students can no longer play this experience.');
+      onAction('unpublished');
+      setOpen(false);
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Unpublish failed.');
     } finally {
       setBusy(null);
     }
@@ -244,6 +296,25 @@ export function ActionsMenu({
                 onClick={handleDuplicate}
                 disabled={isBusy}
               />
+              {!isArchived && (
+                isPublished ? (
+                  <MenuItem
+                    icon={<Undo2 className="h-3.5 w-3.5" />}
+                    label="Unpublish"
+                    hint="Revert to draft — students can no longer play this"
+                    onClick={handleUnpublish}
+                    disabled={isBusy}
+                  />
+                ) : (
+                  <MenuItem
+                    icon={<Send className="h-3.5 w-3.5" />}
+                    label="Publish"
+                    hint="Make available to students"
+                    onClick={handlePublish}
+                    disabled={isBusy}
+                  />
+                )
+              )}
               {isArchived ? (
                 <MenuItem
                   icon={<ArchiveRestore className="h-3.5 w-3.5" />}

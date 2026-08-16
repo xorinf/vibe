@@ -782,6 +782,21 @@ export async function publishIleExperience(
   );
 }
 
+/**
+ * Inverse of publishIleExperience — drops a published ILE back to draft
+ * and clears the publishedAt timestamp on the server. Idempotent on
+ * drafts. The teacher had no direct UI path for this transition before;
+ * they had to archive + unarchive. Pairs with publishIleExperience.
+ */
+export async function unpublishIleExperience(
+  id: string,
+): Promise<IleExperienceResponse> {
+  return postJson<IleExperienceResponse>(
+    `/interactive-experiences/${id}/unpublish`,
+    {},
+  );
+}
+
 export async function getStudentIlePayload(
   id: string,
 ): Promise<StudentIlePayload> {

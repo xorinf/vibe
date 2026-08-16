@@ -125,6 +125,7 @@ export class IleRepository {
     id: string,
     status: IleStatus,
     opts: { archivedAt?: Date | null; publishedAt?: Date | null } = {},
+    session?: ClientSession,
   ): Promise<void> {
     if (!ObjectId.isValid(id)) return;
     const col = await this.col();
@@ -142,10 +143,28 @@ export class IleRepository {
     } else if (opts.archivedAt instanceof Date) {
       (update.$set as Record<string, unknown>).archivedAt = opts.archivedAt;
     }
-    if (opts.publishedAt instanceof Date) {
+    if (opts.publishedAt === null) {
+      // ponytail: null means "clear" (unpublish path). The archivedAt
+      // arm already has a $unset branch — mirror it for publishedAt so
+      // a single setStatus call can both flip status='draft' and drop
+      // the publishedAt timestamp atomically. Without this, unpublish
+      // would need a separate $unset query and a follow-up race window.
+      // Note: archivedAt and publishedAt clear can both fire on the
+      // same call (rare, but legal) — the $unset object is replaced in
+      // that case and the order is preserved by the caller.
+      if (update.$unset) {
+        (update.$unset as Record<string, unknown>).publishedAt = '';
+      } else {
+        update.$unset = { publishedAt: '' };
+      }
+    } else if (opts.publishedAt instanceof Date) {
       (update.$set as Record<string, unknown>).publishedAt = opts.publishedAt;
     }
-    await col.updateOne({ _id: new ObjectId(id) }, update);
+    if (session) {
+      await col.updateOne({ _id: new ObjectId(id) }, update, { session });
+    } else {
+      await col.updateOne({ _id: new ObjectId(id) }, update);
+    }
   }
 
   /**

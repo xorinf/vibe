@@ -658,7 +658,14 @@ export function TeacherILEWorkspace({
 
   const handleLifecycleAction = useCallback(
     async (
-      action: 'renamed' | 'duplicated' | 'archived' | 'unarchived' | 'deleted',
+      action:
+        | 'renamed'
+        | 'duplicated'
+        | 'archived'
+        | 'unarchived'
+        | 'published'
+        | 'unpublished'
+        | 'deleted',
       payload?: { newId?: string; newTitle?: string },
     ) => {
       if (action === 'renamed' && payload?.newTitle) {
@@ -667,11 +674,37 @@ export function TeacherILEWorkspace({
         return;
       }
       if (action === 'duplicated') return;
-      if (action === 'archived' || action === 'unarchived') {
+      if (
+        action === 'archived' ||
+        action === 'unarchived' ||
+        action === 'published' ||
+        action === 'unpublished'
+      ) {
+        // Refresh `saved` so the menu's Publish/Unpublish and pill
+        // reflect the new status, and so the in-memory snapshot
+        // matches what's now on disk.
         if (saved) {
           try {
             const fresh = await getIleExperience(saved._id);
             setSaved(fresh);
+            // Tell the section tree to refetch — the itemsGroup row's
+            // status mirror was updated by the same backend transaction
+            // (publish/unpublish both call tryPatchItemsGroupPointer),
+            // so the sidebar pill should flip in lockstep with this
+            // workspace state.
+            window.dispatchEvent(
+              new CustomEvent(ILE_SAVED_EVENT, {
+                detail: {
+                  itemsGroupItemId: fresh.itemId,
+                  experienceId: fresh._id,
+                  currentVersion: fresh.currentVersion,
+                  status: fresh.status,
+                  updatedAt: fresh.updatedAt
+                    ? Date.parse(fresh.updatedAt)
+                    : Date.now(),
+                },
+              }),
+            );
           } catch {
             /* surface is handled by the menu's own toast */
           }
@@ -812,6 +845,7 @@ export function TeacherILEWorkspace({
               experienceId={saved._id}
               currentTitle={saved.title}
               isArchived={saved.status === 'archived'}
+              isPublished={saved.status === 'published'}
               onAction={handleLifecycleAction}
             />
           ) : null}
