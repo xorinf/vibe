@@ -848,7 +848,21 @@ Accessible to:
       );
     }
 
-    const getItemBeforeUpdate = await this.itemService.readItem(user._id.toString(), versionId, itemId);
+    // Run the toggle write first; the service returns the updated item so
+    // we can derive `itemType` from its response. Previously this endpoint
+    // called `this.itemService.readItem(...)` purely to capture the type for
+    // the audit trail — but `readItem` gates on enrollment, so any caller
+    // without a Mongo enrollment row (which includes the test user and any
+    // teacher seeded only through Firebase auth) hit a 401 before the
+    // toggle's PUT ever ran. The CASL ability check above is the real
+    // authorization gate; the enrollment gate here was scope-confused for
+    // a teacher's own course edit.
+    const updatedItem = await this.itemService.updateItemOptionalStatus(
+      versionId,
+      itemId,
+      body.isOptional,
+    );
+
     setAuditTrail(req, {
       category: AuditCategory.ITEM,
       action: AuditAction.ITEM_MAKE_OPTIONAL,
@@ -861,11 +875,11 @@ Accessible to:
       context: {
         courseVersionId: ObjectId.createFromHexString(versionId),
         itemId: ObjectId.createFromHexString(itemId),
-        itemType: getItemBeforeUpdate.type,
+        itemType: updatedItem?.type,
       },
       changes: {
         before: {
-          isOptional: !body.isOptional, // Assuming the status is being toggled
+          isOptional: !body.isOptional,
         },
         after: {
           isOptional: body.isOptional,
@@ -876,11 +890,7 @@ Accessible to:
       },
     });
 
-    return await this.itemService.updateItemOptionalStatus(
-      versionId,
-      itemId,
-      body.isOptional,
-    );
+    return updatedItem;
   }
 
   @OpenAPI({
